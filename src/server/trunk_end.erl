@@ -38,8 +38,6 @@ wait_for_ok(timeout, {TrunkSocket, Config, Statics}=Context) ->
 				{ctl, trunk, ok, [SharedKey]} ->
 					% Fine
 					log(log_debug, "trunker_ok, got shared key: ~p", [SharedKey]),
-					%Pid = spawn(?MODULE, trunker_hub, [Client_socket, Config, [{sharedkey, SharedKey}]]),
-					%Pid = spawn(fun ()-> trunker_hub(Client_socket, Config, [{sharedkey, SharedKey}]) end),
 					inet:setopts(TrunkSocket, [{active, true}]),
 					{nextstate, relay, {TrunkSocket, Config, Statics}, 60000};
 				{ctl, trunk, failure, [Reason]} ->
@@ -76,7 +74,7 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 					{nextstate, relay, Context};
 			end;
 		{ctl, Level, Code, Args} ->
-			log(log_info, "Unknown control message: ~p_~p(~p).", [Level, Code, Args]),
+			log(log_info, "Unknown control message: ~p/~p(~p).", [Level, Code, Args]),
 			{nextstate, relay, Context};
 		Msg ->
 			log(log_info, "Unknown message: ~p.", [Msg]),
