@@ -9,7 +9,9 @@
 -export([log/2, log/3]).
 
 start_link(GenConfig) ->
-	gen_server:start_link({local, log_center}, ?MODULE, [GenConfig], []).
+	Ret = gen_server:start_link({local, log_center}, ?MODULE, [GenConfig], []),
+	log(log_info, "log_center started."),
+	Ret.
 
 init([GenConfig]) ->
 	put(log_debug,	{"DEBUG", 0}),
@@ -23,7 +25,7 @@ init([GenConfig]) ->
 	{_, LeastLevel_val} = get(LeastLevel),
 	case file:open(Path, [append, {encoding, utf8}, sync]) of
 		{ok, LogFile} ->
-			log(log_info, "log_center started at level ~p.", [LeastLevel]),
+			%log(log_info, "log_center started at level ~p.", [LeastLevel]),
 			{ok, {LogFile, LeastLevel_val, GenConfig}};
 		{error, Reason} ->
 			io:format("Open log [~s] failed: ~s\n", [Path, Reason]),
@@ -31,12 +33,13 @@ init([GenConfig]) ->
 	end.
 
 log(Level, String) ->
-	gen_server:call(log_center, {log, Level, string:strip(String), []}).
+	gen_server:cast(log_center, {log, Level, string:strip(String), []}).
 
 log(Level, Format, ArgList) ->
-	gen_server:call(log_center, {log, Level, string:strip(Format), ArgList}).
+	gen_server:cast(log_center, {log, Level, string:strip(Format), ArgList}).
 
 handle_call({log, Level, Format, ArgList}, _From, {LogFile, LeastLevel, _GenConfig}=State) ->
+	io:format("Got a log call!\n"),
 	{LogLevelString, LogValue} = get(Level),
 	if
 		LogValue>=LeastLevel ->
@@ -50,8 +53,20 @@ handle_call('EXIT', _From, {LogFile, _LeastLevel, _GenConfig}=State) ->
 	io:format(LogFile, prepend_time(io_lib:format(LogLevelString++": "++"log service exit.")), []),
 	{stop, "", State}.
 
-handle_cast(_, State) ->
-	{noreply, State}.
+handle_cast({log, Level, Format, ArgList}, {LogFile, LeastLevel, _GenConfig}=State) ->
+	io:format("Got a log cast!\n"),
+	{LogLevelString, LogValue} = get(Level),
+	if
+		LogValue>=LeastLevel ->
+			io:format(LogFile, prepend_time(io_lib:format(LogLevelString++": "++Format, ArgList)), []),
+			{noreply, State, infinity};
+		true ->	% Drop low level logs.
+			{noreply, State, infinity}
+	end;
+handle_cast('EXIT', {LogFile, _LeastLevel, _GenConfig}=State) ->
+	{LogLevelString, _LogValue} = get(log_info),
+	io:format(LogFile, prepend_time(io_lib:format(LogLevelString++": "++"log service exit.")), []),
+	{stop, "", State}.
 
 handle_info(_, State) ->
 	{noreply, State}.
