@@ -4,8 +4,8 @@
 -export([start_link/2]).
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3, terminate/2, code_change/3]).
 
-start_link(SockAddr, L7Config) ->
-	io:format("~p:start_link(~p, ~p)\n", [?MODULE, SockAddr, L7Config]),
+start_link(SockAddr, L7Name, L7Config) ->
+	io:format("~p:start_link(~p, ~p)\n", [?MODULE, SockAddr, config:set({l7name, L7Name},L7Config)]),
 	gen_server:start_link(?MODULE, [SockAddr, L7Config], []).
 
 init([{Addr, Port}, L7Config]) ->
@@ -19,9 +19,12 @@ init([{Addr, Port}, L7Config]) ->
 		{error, Reason} -> {stop, Reason}
 	end.
 
-handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, Statics}=_Context) ->
+handle_info({'EXIT', TrunkPid, Reason}, {ListenSocket, Ref, Config, Context}=_State) ->
+	{noreply, {ListenSocket, Ref, Config, lists:keydelete(TrunkPid, 2, Context)}};
+handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, Context}=_State) ->
 	io:format("Got connection from: ~p\n", [inet:peernames(TrunkSocket)]),
-	% TODO: trunk_end:create(TrunkSocket, Config),
+	{ok, Pid} = trunk_end:start_link(TrunkSocket, Config),
+	
 	set_sockopt(ListenSocket, TrunkSocket),
 	%gen_tcp:controlling_process(TrunkSocket, Pid),
 	gen_tcp:send(TrunkSocket, "Hello!\n"),
