@@ -1,8 +1,8 @@
 -module(trunk_end).
 -behaviour(gen_fsm).
 
--export([start_link/0, start_link/1]).
--export([init/2]).
+-export([start_link/2]).
+-export([init/1]).
 
 -import(config, [config/2]).
 -import(log, [log/2, log/3]).
@@ -13,25 +13,25 @@ start_link(TrunkSocket, Config) ->
 	gen_fsm:start_link(?MODULE, [TrunkSocket, Config], []).
 
 init([TrunkSocket, Config]) ->
-	{ok, wait_for_socket, {TrunkSocket, Config, []}}.
+	{ok, wait_for_socket, {TrunkSocket, Config, [{flowid, []}]}}.
 
-wait_for_socket({socket_ready, TrunkSocket}, {TrunkSocket, Config, Statics}=Context) ->
+wait_for_socket({socket_ready, TrunkSocket}, {TrunkSocket, Config, Context}=State) ->
 	inet:setopts(TrunkSocket, [{active, false}, {packet, 2}, binary]),
 	io:format("Serving client: ~p\n", [inet:peernames(TrunkSocket)]),
-    {next_state, send_config, {TrunkSocket, Config, Statics++[{connect_time, 'TODO'}]}, 0};
-wait_for_socket(_UnkownMsg, Context) ->
+	send_config(goto, {TrunkSocket, Config, config:set({connect_time, 'TODO'}, Context++[{pubkey, <<"Fake pubkey">>}, {privkey, <<"Fake privkey">>}])});
+wait_for_socket(_UnkownMsg, State) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
-	{next_state, wait_for_socket, Context}.
+	{next_state, wait_for_socket, State}.
 
-send_config(timeout, {TrunkSocket, Config, Statics}=Context) ->
-	{ok, Frame} = frame:encode({ctl, trunk, config, <<"====[Fake certificate]====">> }, Context),
+send_config(goto, {TrunkSocket, Config, Context}=State) ->
+	{ok, Frame} = frame:encode({ctl, trunk, config, <<"====[Fake certificate]====", 0:8>> }, Context),
 	gen_tcp:send(TrunkSocket, Frame),
-	{next_state, wait_for_ok, Context};
+	wait_for_ok(goto, State);
 send_config(_UnkownMsg, Context) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
 	{next_state, term, Context, 0}.
 
-wait_for_ok(timeout, {TrunkSocket, Config, Statics}=Context) ->
+wait_for_ok(goto, {TrunkSocket, Config, Statics}=Context) ->
 	case gen_tcp:recv(TrunkSocket, 0) of
 		{ok, Packet} ->
 			case frame:decode(Packet, [])	of
@@ -39,17 +39,19 @@ wait_for_ok(timeout, {TrunkSocket, Config, Statics}=Context) ->
 					% Fine
 					log(log_debug, "trunker_ok, got shared key: ~p", [SharedKey]),
 					inet:setopts(TrunkSocket, [{active, true}]),
-					{nextstate, relay, {TrunkSocket, Config, Statics}, 60000};
+					{next_state, relay, {TrunkSocket, Config, Statics}, infinity};
 				{ctl, trunk, failure, [Reason]} ->
 					%log(log_error, "Peer failed."),
 					{nextstate, term, Context, 0};
 				Msg ->
 					log(log_error, "Got unknwon reply while expecting trunker_ok: ~p", [Msg]),
-					{nextstate, term, Context, 0};
+					term(goto, Context)
 			end
 	end.
 
-relay(timeout, {TrunkSocket, Config, Statics}=Context) ->
+relay({tcp_closed, TrunkSocket}, {TrunkSocket, Config, Statics}=Context) ->
+	log(log_info, "Trunk socket to ~p:~p closed, trunk_end terminate.", [])
+	{}
 relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 	case frame:decode(Frame, Context) of
 		{data, _Prio, FlowID, RawData} ->
@@ -71,74 +73,72 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 					{nextstate, relay, Context};
 				_ ->
 					log(log_error, "ctl_framer_close(~p) failed: No PID associated.", [FlowID]),
-					{nextstate, relay, Context};
+					{nextstate, relay, Context}
 			end;
 		{ctl, Level, Code, Args} ->
 			log(log_info, "Unknown control message: ~p/~p(~p).", [Level, Code, Args]),
-			{nextstate, relay, Context};
+			{next_state, relay, Context};
 		Msg ->
 			log(log_info, "Unknown message: ~p.", [Msg]),
-			{nextstate, relay, Context};
+			{next_state, relay, Context}
 	end;
-relay({flowdata, _Prio, FlowID, CryptFlag, RawData}, Context) ->
+relay({flowdata, FlowID, CryptFlag, RawData}, {TrunkSocket, Config, Statics}=Context) ->
+	case frame:encode({data, Prio, FlowID, RawData}, context(sharedkey, Context)) of
+		{ok, Bin} ->
+			gen_tcp:send(TrunkSocket, Bin),
+			{next_state, relay, Context};
+		{error, Reason} ->
+			log(log_error, "frame:encode() failed: ~s, frame dropped.", [Reason])
+			{next_state, relay, Context}
+	end;
+relay({flowctl, Level, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
+	case frame:encode({ctl, Level, Code, Args}, context(sharedkey, Context)) of
+		{ok, Bin} ->
+			gen_tcp:send(TrunkSocket, Bin),
+			{next_state, relay, Context};
+		{error, Reason} ->
+			log(log_error, "frame:encode() failed: ~s, frame dropped.", [Reason])
+			{next_state, relay, Context}
+	end;
+relay({get_flowid, From}, Context) ->
+	IDList = config:get(flowid, Context),
+	case alloc_flowid(IDList) of
+		full ->
+			From ! full,
+			{next_state, relay, Context};
+		Id ->
+			From ! Id,
+			{next_state, relay, config:set({flowid, IDList++[Id]}, Context)}
+	end;
+relay({flowend_exit, FlowId}, Context) ->
+	erase(FlowId),
+	{next_state, relay, Context}.
 
+term(goto, State) ->
+	{stop, "Normal terminate", State}.
+
+alloc_flowid(List) ->
+	NextID=lists:max(List)+1,
+	if
+		NextID==1 bsl 31 ->
+			SlowID=uniqid_slow(List),
+			SlowID;
+		true ->
+			NextID
+	end.
+
+uniqid_slow(List) when length(List)==1 bsl 31 -1 ->
+	full;
+uniqid_slow(List) ->
+	uniqid_slow(0, List).
+uniqid_slow(Id, List) ->
+	case lists:member(Id, List) of
+		true -> uniqid_slow(Id+1, List);
+		fasle -> Id
+	end.
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%
-
-protocol(send_config, Client_socket, Config, Context) ->
-	io:format("send_config\n"),
-	% Read certificate and server key here.
-	protocol(recv_trunker_ack, Client_socket, Config, Context++[{pubkey, <<"Fake pubkey">>}, {privkey, <<"Fake privkey">>}]);
-
-protocol(main_loop, Client_socket, Config, Context) ->
-	case gen_tcp:recv(Client_socket, 0) of
-		{ok, Packet} ->
-			case frame:decode(Packet, Context) of
-				{data, _Prio, FlowID, RawData} ->
-					case get(FlowID) of
-						{Pid, _Prio, _RequestData} ->
-							Pid ! {data, RawData};
-						_ ->
-							log(log_error, "Data to flow ~p failed: No PID associated.", [FlowID])
-					end,
-					protocol(main_loop, Client_socket, Config, Context);
-				{ctl, framer, open, [Prio, FlowID, RequestData]} ->
-					Pid = framer:create(context(trunker_hub, Context), Prio, FlowID, RequestData),
-					put(FlowID, {Pid, Prio, RequestData}),
-					protocol(main_loop, Client_socket, Config, Context);
-				{ctl, framer, close, [FlowID]}=Msg ->
-					case get(FlowID) of
-						{Pid, _Prio, _RequestData} ->
-							Pid ! Msg,
-							protocol(main_loop, Client_socket, Config, Context);
-						_ ->
-							log(log_error, "ctl_framer_close(~p) failed: No PID associated.", [FlowID]),
-							protocol(main_loop, Client_socket, Config, Context)
-					end;
-				{ctl, Level, Code, Args} ->
-					log(log_info, "Unknown control message: ~p_~p(~p).", [Level, Code, Args]),
-					protocol(main_loop, Client_socket, Config, Context);
-				Msg ->
-					log(log_info, "Unknown message: ~p.", [Msg]),
-					protocol(main_loop, Client_socket, Config, Context)
-			end
-	end;
-
-protocol(name_resolv, Client_socket, Config, Context) ->
-	case inet_res:gethostbyname(config(domainname, Context)) of
-		{ok, Hostent} ->
-			[Daddr|_] = Hostent#hostent.h_addr_list,
-			protocol(try_connect, Client_socket, Config, Context++[{daddr, Daddr}]);
-		{error, Reason} ->
-			protocol(term, Client_socket, Config, Context++[{error, Reason}])
-	end;
-
-protocol(term, _Client_socket, _Config, _Context) ->
-	%io:format("terminating\n"),
-	% TODO: Do some log if needed.
-	ok.
-
 
 trunker_hub(Client_socket, Config, Context) ->
 	%PrioQueue = prioqueue:new(8),
@@ -146,13 +146,6 @@ trunker_hub(Client_socket, Config, Context) ->
 
 trunker_hub_loop(Client_socket, _Config, _PrioQueue, Context) ->
 	receive
-		{data, FlowID, Prio, RawData} ->
-			case frame:encode({data, Prio, FlowID, RawData}, context(sharedkey, Context)) of
-				{ok, Bin} ->
-					gen_tcp:send(Client_socket, Bin);
-				{error, Reason} ->
-					log(log_error, "frame:encode() failed: ~s", [Reason])
-			end;
 		{ctl, Level, Code, Args} ->
 			case frame:encode({ctl, Level, Code, Args}, context(sharedkey, Context)) of
 				{ok, Bin} ->
