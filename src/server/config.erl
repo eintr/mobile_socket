@@ -1,6 +1,6 @@
 -module(config).
 
--export([get/2, load_conf/1]).
+-export([get/2, set/2, load_conf/1]).
 
 -include("config.hrl").
 
@@ -32,6 +32,9 @@ get(Key, Config) ->
         {Key, Value} -> Value;
         false -> false
     end.
+
+set({Key, Val}, Config) ->
+	lists:key_store(Key, 1, Config, {Key, Val}).
 
 kvlist_merge([], Background) ->
 	Background;
