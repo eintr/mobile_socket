@@ -30,11 +30,11 @@ prepare(go, {TrunkSocket, Config, _Context}=_State) ->
 	inet:setopts(TrunkSocket, [{active, true}]),
 	{next_state, recv_config, {TrunkSocket, Config, [{flowtable, []}]}, infinity}.
 
-recv_config({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Context}=State) ->
+recv_config({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Context}=_State) ->
 	case frame:decode(Frame, Context) of
 		{ctl, trunk, config, Certificate} ->
 			% Extract pub_key from Certificate
-			Certificate,
+			io:format("recv_config: Certificate is:~p\n", [Certificate]),
 			trunk_ok(goto, {TrunkSocket, Config, config:set({pub_key, <<"PubKey">>}, Context)});
 		Msg ->
 			io:format("Got a ~p while expecting {ctl, trunk, config}\n", [Msg])
@@ -58,6 +58,9 @@ create_flow(goto, {TrunkSocket, _Config, Context}=State) ->
 main_loop(timeout, State) ->
 	io:format("Did not get any data in 5 secends, continue...\n"),
 	{next_state, main_loop, State, 5000};
+main_loop({tcp_closed, TrunkSocket}, {TrunkSocket, _Config, _Context}=State) ->
+	io:format("Socket closed by peer.\n"),
+	{next_state, term, State};
 main_loop({tcp, TrunkSocket, Frame}, {TrunkSocket, _Config, Context}=State) ->
 	case frame:decode(Frame, Context) of
 		{data, 1, Data} ->
