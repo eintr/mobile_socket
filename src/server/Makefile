@@ -1,7 +1,7 @@
 include ../config.mk
 
 #sources=simple_tcp_server.erl config.erl log.erl mycrypt.erl frame.erl trunker.erl weibo_fcgi.erl framer.erl fastcgi_client.erl
-sources=l7_server.erl  l7_sup.erl
+sources=l7_server.erl  l7_sup.erl config.erl log.erl mycrypt.erl frame.erl trunk_end.erl client.erl
 
 beams=$(sources:.erl=.beam)
 
