@@ -19,16 +19,17 @@ init([{Addr, Port}, L7Config]) ->
 		{error, Reason} -> {stop, Reason}
 	end.
 
-handle_info({'EXIT', TrunkPid, Reason}, {ListenSocket, Ref, Config, Context}=_State) ->
+handle_info({'EXIT', TrunkPid, _Reason}, {ListenSocket, Ref, Config, Context}=_State) ->
 	{noreply, {ListenSocket, Ref, Config, lists:keydelete(TrunkPid, 2, Context)}};
-handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, Context}=State) ->
+handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, _Context}=State) ->
 	io:format("Got connection from: ~p\n", [inet:peernames(TrunkSocket)]),
 	{ok, Pid} = trunk_end:start_link(TrunkSocket, Config),
 	
 	set_sockopt(ListenSocket, TrunkSocket),
-	%gen_tcp:controlling_process(TrunkSocket, Pid),
-	gen_tcp:send(TrunkSocket, "Hello!\n"),
-	gen_tcp:close(TrunkSocket),
+	gen_tcp:controlling_process(TrunkSocket, Pid),
+	gen_fsm:send_event(Pid, {socket_ready, TrunkSocket}),
+	%gen_tcp:send(TrunkSocket, "Hello!\n"),
+	%gen_tcp:close(TrunkSocket),
 
 	%% Signal the network driver that we are ready to accept another connection
 	case prim_inet:async_accept(ListenSocket, -1) of
