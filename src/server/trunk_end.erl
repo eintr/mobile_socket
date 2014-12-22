@@ -2,7 +2,7 @@
 -behaviour(gen_fsm).
 
 -export([start_link/2]).
--export([init/1, terminate/3]).
+-export([init/1, handle_info/3, terminate/3]).
 -export([wait_for_socket/2, send_config/2, wait_for_ok/2, relay/2, term/2]).
 
 -import(config, [config/2]).
@@ -54,7 +54,7 @@ relay({tcp_closed, TrunkSocket}, {TrunkSocket, Config, Statics}=Context) ->
 	log(log_info, "Trunk socket to ~p:~p closed, trunk_end terminate.", []),
 	{next_state, term, Context};
 relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
-	case frame:decode(Frame, Context) of
+	case frame:decode(Frame, Statics) of
 		{data, _Prio, FlowID, RawData} ->
 			case get(FlowID) of
 				{Pid, _Prio, _RequestData} ->
@@ -121,6 +121,9 @@ term(goto, State) ->
 terminate(Reason, _StateName, {TrunkSocket, _Config, _Statics}) ->
     gen_tcp:close(TrunkSocket),
     io:format("Trunc_end is terminating from reason: ~p\n", [Reason]).
+
+handle_info(Info, StateName, State) ->
+	?MODULE:StateName(Info, State).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
