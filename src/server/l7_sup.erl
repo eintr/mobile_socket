@@ -4,9 +4,9 @@
 -export([start_link/0, start_link/1, init/1]).
 
 -define(L7_TEST_CONFIG, [
+	{l7name, "TestServer"},
 	{port, [18080, 18081]},
     {addr, [{0,0,0,0}]},
-    {admin_port, 8972},
 
     {crt_file, "conf/server.crt"},
     {key_file, "conf/server.key"},
@@ -32,13 +32,13 @@ start_link(L7Config) ->
     supervisor:start_link({local, l7_sup}, l7_sup, L7Config).
 
 init(L7Config) ->
-	%io:format("l7_sup:init()\n"),
+	io:format("l7_sup:init()\n"),
 	SockaddrList = [{Addr, Port} || Addr<-config:get(addr, L7Config), Port<-config:get(port, L7Config)],
-	%io:format("SockaddrList = ~p\n", [SockaddrList]),
+	io:format("SockaddrList = ~p\n", [SockaddrList]),
 	ChildList = lists:map(fun (E)->
-		{l7_servername(E), {l7_server, start_link, [E, [{dumb_config, nil}]]}, permanent, brutal_kill, worker, [l7_server]} end,
+		{l7_servername(E), {l7_server, start_link, [E, L7Config]}, permanent, brutal_kill, worker, [l7_server]} end,
 		SockaddrList),
-	%io:format("ChildList = ~p\n", [ChildList]),
+	io:format("ChildList = ~p\n", [ChildList]),
 	{ok, {{one_for_one, 1000000000000000000000000000000000, 1}, ChildList}}.
 
 l7_servername({{A,B,C,D}, Port}) ->

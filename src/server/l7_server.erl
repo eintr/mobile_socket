@@ -4,12 +4,12 @@
 -export([start_link/2]).
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3, terminate/2, code_change/3]).
 
-start_link(SockAddr, L7Name, L7Config) ->
-	io:format("~p:start_link(~p, ~p)\n", [?MODULE, SockAddr, config:set({l7name, L7Name},L7Config)]),
+start_link(SockAddr, L7Config) ->
+	io:format("~p:start_link(~p, ~p)\n", [?MODULE, SockAddr, L7Config]),
 	gen_server:start_link(?MODULE, [SockAddr, L7Config], []).
 
 init([{Addr, Port}, L7Config]) ->
-    io:format("Try to Listen: {~p, ~b}\n", [Addr, Port]),
+    io:format("Try to Listen: {~p, ~b} with config ~p\n", [Addr, Port, L7Config]),
 	case gen_tcp:listen(Port, [binary, {ip, Addr}, {packet, 0}, {reuseaddr, true}, {keepalive, true}, {backlog, 30}, {active, false}]) of
 		{ok, ListenSocket} ->
 			io:format("gen_tcp:listen(): OK\n"),
@@ -21,7 +21,7 @@ init([{Addr, Port}, L7Config]) ->
 
 handle_info({'EXIT', TrunkPid, Reason}, {ListenSocket, Ref, Config, Context}=_State) ->
 	{noreply, {ListenSocket, Ref, Config, lists:keydelete(TrunkPid, 2, Context)}};
-handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, Context}=_State) ->
+handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, Context}=State) ->
 	io:format("Got connection from: ~p\n", [inet:peernames(TrunkSocket)]),
 	{ok, Pid} = trunk_end:start_link(TrunkSocket, Config),
 	
@@ -35,7 +35,7 @@ handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, R
 		{ok,    NewRef} -> ok;
 		{error, NewRef} -> exit({async_accept, inet:format_error(NewRef)})
 	end,
-	{noreply, {ListenSocket, NewRef, Config, Statics}};
+	{noreply, {ListenSocket, NewRef, Config, State}};
 handle_info(_UnknwonInfo, Context) ->
 	io:format("Got unkown info: ~p\n", [_UnknwonInfo]),
     {noreply, Context}.
