@@ -34,7 +34,7 @@ get(Key, Config) ->
     end.
 
 set({Key, Val}, Config) ->
-	lists:key_store(Key, 1, Config, {Key, Val}).
+	lists:keystore(Key, 1, Config, {Key, Val}).
 
 kvlist_merge([], Background) ->
 	Background;
