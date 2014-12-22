@@ -2,7 +2,8 @@
 -behaviour(gen_fsm).
 
 -export([start_link/2]).
--export([init/1]).
+-export([init/1, terminate/3]).
+-export([wait_for_socket/2, send_config/2, wait_for_ok/2, relay/2, term/2]).
 
 -import(config, [config/2]).
 -import(log, [log/2, log/3]).
@@ -18,13 +19,13 @@ init([TrunkSocket, Config]) ->
 wait_for_socket({socket_ready, TrunkSocket}, {TrunkSocket, Config, Context}=State) ->
 	inet:setopts(TrunkSocket, [{active, false}, {packet, 2}, binary]),
 	io:format("Serving client: ~p\n", [inet:peernames(TrunkSocket)]),
-	send_config(goto, {TrunkSocket, Config, config:set({connect_time, 'TODO'}, Context++[{pubkey, <<"Fake pubkey">>}, {privkey, <<"Fake privkey">>}])});
+	send_config(goto, {TrunkSocket, Config, config:set(	{connect_time, 'TODO'}, Context++[{pubkey, <<"Fake pubkey">>}, {privkey, <<"Fake privkey">>}])});
 wait_for_socket(_UnkownMsg, State) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
 	{next_state, wait_for_socket, State}.
 
 send_config(goto, {TrunkSocket, Config, Context}=State) ->
-	{ok, Frame} = frame:encode({ctl, trunk, config, <<"====[Fake certificate]====", 0:8>> }, Context),
+	{ok, Frame} = frame:encode({ctl, trunk, config, [<<"====[Fake certificate]====", 0:8>>] }, Context),
 	gen_tcp:send(TrunkSocket, Frame),
 	wait_for_ok(goto, State);
 send_config(_UnkownMsg, Context) ->
@@ -50,8 +51,8 @@ wait_for_ok(goto, {TrunkSocket, Config, Statics}=Context) ->
 	end.
 
 relay({tcp_closed, TrunkSocket}, {TrunkSocket, Config, Statics}=Context) ->
-	log(log_info, "Trunk socket to ~p:~p closed, trunk_end terminate.", [])
-	{}
+	log(log_info, "Trunk socket to ~p:~p closed, trunk_end terminate.", []),
+	{next_state, term, Context};
 relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 	case frame:decode(Frame, Context) of
 		{data, _Prio, FlowID, RawData} ->
@@ -83,12 +84,12 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 			{next_state, relay, Context}
 	end;
 relay({flowdata, FlowID, CryptFlag, RawData}, {TrunkSocket, Config, Statics}=Context) ->
-	case frame:encode({data, Prio, FlowID, RawData}, context(sharedkey, Context)) of
+	case frame:encode({data, FlowID, RawData}, context(sharedkey, Context)) of
 		{ok, Bin} ->
 			gen_tcp:send(TrunkSocket, Bin),
 			{next_state, relay, Context};
 		{error, Reason} ->
-			log(log_error, "frame:encode() failed: ~s, frame dropped.", [Reason])
+			log(log_error, "frame:encode() failed: ~s, frame dropped.", [Reason]),
 			{next_state, relay, Context}
 	end;
 relay({flowctl, Level, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
@@ -97,7 +98,7 @@ relay({flowctl, Level, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
 			gen_tcp:send(TrunkSocket, Bin),
 			{next_state, relay, Context};
 		{error, Reason} ->
-			log(log_error, "frame:encode() failed: ~s, frame dropped.", [Reason])
+			log(log_error, "frame:encode() failed: ~s, frame dropped.", [Reason]),
 			{next_state, relay, Context}
 	end;
 relay({get_flowid, From}, Context) ->
@@ -116,6 +117,12 @@ relay({flowend_exit, FlowId}, Context) ->
 
 term(goto, State) ->
 	{stop, "Normal terminate", State}.
+
+terminate(Reason, _StateName, {TrunkSocket, _Config, _Statics}) ->
+    gen_tcp:close(TrunkSocket),
+    io:format("Trunc_end is terminating from reason: ~p\n", [Reason]).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 alloc_flowid(List) ->
 	NextID=lists:max(List)+1,
