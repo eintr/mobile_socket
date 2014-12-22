@@ -11,11 +11,11 @@ struct frame_st {
 	uint8_t frame_flags; 
 	uint8_t frame_body[0]; 
 } __attribute__((packed)); 
-#define	FRAME_CRYPT(X)	(((X)->frame_flags)&FRAME_FLAG_MASK_CRYPT)
 #define	FRAME_FLAG_MASK_CRYPT		0x07
 #define	FRAME_FLAG_NOCRYPT			0
 #define	FRAME_FLAG_CRYPT_PRND		1
 #define	FRAME_FLAG_CRYPT_BLOWFISH	2
+#define	FRAME_CRYPT(X)	(((X)->frame_flags)&FRAME_FLAG_MASK_CRYPT)
 
 struct frame_body_data_st { 
 	uint32_t msg_type:1;	/* Must == 0 */ 
