@@ -27,8 +27,8 @@ encrypt_frame_body(Data, Type, _SharedKey) ->
     Data.
 
 encrypt_shared_key(Data, _Pubkey) ->
-	<<"FAKE_RSA_CRYPT", Data>>.
+	<<"FAKE_RSA_CRYPT", Data/binary>>.
 
-decrypt_shared_key(<<"FAKE_RSA_CRYPT", Data>>, _Privkey) ->
+decrypt_shared_key(<<"FAKE_RSA_CRYPT", Data/binary>>, _Privkey) ->
 	Data.
 
