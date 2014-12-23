@@ -51,15 +51,15 @@ encode(v1, {ctl, trunk, failure, [ErrorMsg]}, _Context) ->
 encode(v1, {ctl, flow, open, [FlowID, HTTPReqHeader]}, Context) ->
 	Raw_body = <<1:1/big-integer, ?OP_FLOW_OPEN:31/big-integer, FlowID:32/big-integer, HTTPReqHeader/binary>>,
 	Frame_body = mycrypt:encrypt_frame_body(Raw_body, 1, config:get(sharedkey, Context)),
-	{ok, <<1:8/big-integer, 0:3/big-integer, 0:5/big-integer, Frame_body/binary>>};
+	{ok, <<1:8/big-integer, 1:3/big-integer, 0:5/big-integer, Frame_body/binary>>};
 encode(v1, {ctl, flow, failure, [FlowID, ErrorMsg]}, Context) ->
 	Raw_body = <<1:1/big-integer, ?OP_FLOW_FAILURE:31/big-integer, FlowID:32/big-integer, ErrorMsg/binary>>,
 	Frame_body = mycrypt:encrypt_frame_body(Raw_body, 1, config:get(sharedkey, Context)),
-	{ok, <<1:8/big-integer, 0:3/big-integer, 0:5/big-integer, Frame_body/binary>>};
+	{ok, <<1:8/big-integer, 1:3/big-integer, 0:5/big-integer, Frame_body/binary>>};
 encode(v1, {ctl, flow, close, [FlowID]}, Context) ->
 	Raw_body = <<1:1/big-integer, ?OP_FLOW_CLOSE:31/big-integer, FlowID:32/big-integer>>,
 	Frame_body = mycrypt:encrypt_frame_body(Raw_body, 1, config:get(sharedkey, Context)),
-	{ok, <<1:8/big-integer, 0:3/big-integer, 0:5/big-integer, Frame_body/binary>>};
+	{ok, <<1:8/big-integer, 1:3/big-integer, 0:5/big-integer, Frame_body/binary>>};
 % TODO: to be continued.
 encode(v1, {ctl, Level, Code, _Args}, _Context) ->
 	log(log_error, "Don't know how to encode ~p/~p message.", [Level, Code]),
