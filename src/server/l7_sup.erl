@@ -39,7 +39,9 @@ init(L7Config) ->
 		{l7_servername(E), {l7_server, start_link, [E, L7Config]}, permanent, brutal_kill, worker, [l7_server]} end,
 		SockaddrList),
 	io:format("ChildList = ~p\n", [ChildList]),
-	{ok, {{one_for_one, 1000000000000000000000000000000000, 1}, ChildList}}.
+	{ok, {{one_for_one, 1000000000000000000000000000000000, 1}, ChildList ++ [
+		{log, {log, start_link, [L7Config]}, permanent, brutal_kill, worker, [log]}
+	]}}.
 
 l7_servername({{A,B,C,D}, Port}) ->
 	list_to_atom(lists:flatten(io_lib:format("l7_on_~b_~b_~b_~b_~b", [A,B,C,D, Port]))).
