@@ -17,6 +17,7 @@ init([TrunkSocket, Config]) ->
 	{ok, wait_for_socket, {TrunkSocket, Config, [{flowid, []}]}}.
 
 wait_for_socket({socket_ready, TrunkSocket}, {TrunkSocket, Config, Context}=State) ->
+	gen_tcp:controlling_process(TrunkSocket, self()),
 	inet:setopts(TrunkSocket, [{active, false}, {packet, 2}, binary]),
 	io:format("Serving client: ~p\n", [inet:peernames(TrunkSocket)]),
 	send_config(goto, {TrunkSocket, Config, config:set(	{connect_time, 'TODO'}, Context++[{pubkey, <<"Fake pubkey">>}, {privkey, <<"Fake privkey">>}])});
@@ -26,7 +27,7 @@ wait_for_socket(_UnkownMsg, State) ->
 
 send_config(goto, {TrunkSocket, Config, Context}=State) ->
 	{ok, Frame} = frame:encode({ctl, trunk, config, [<<"====[Fake certificate]====", 0:8>>] }, Context),
-	gen_tcp:send(TrunkSocket, Frame),
+	ok = gen_tcp:send(TrunkSocket, Frame),
 	wait_for_ok(goto, State);
 send_config(_UnkownMsg, Context) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
@@ -38,12 +39,12 @@ wait_for_ok(goto, {TrunkSocket, Config, Statics}=Context) ->
 			case frame:decode(Packet, [])	of
 				{ctl, trunk, ok, [SharedKey]} ->
 					% Fine
-					log(log_debug, "trunker_ok, got shared key: ~p", [SharedKey]),
-					inet:setopts(TrunkSocket, [{active, true}]),
-					{next_state, relay, {TrunkSocket, Config, Statics}, infinity};
+					log(log_info, "trunker_ok, got shared key: ~p", [SharedKey]),
+					ok = inet:setopts(TrunkSocket, [{active, true}]),
+					{next_state, relay, Context};
 				{ctl, trunk, failure, [Reason]} ->
 					%log(log_error, "Peer failed."),
-					{nextstate, term, Context, 0};
+					{next_state, term, Context, 0};
 				Msg ->
 					log(log_error, "Got unknwon reply while expecting trunker_ok: ~p", [Msg]),
 					term(goto, Context)
@@ -55,26 +56,26 @@ relay({tcp_closed, TrunkSocket}, {TrunkSocket, Config, Statics}=Context) ->
 	{next_state, term, Context};
 relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 	case frame:decode(Frame, Statics) of
-		{data, _Prio, FlowID, RawData} ->
+		{data, FlowID, RawData} ->
 			case get(FlowID) of
-				{Pid, _Prio, _RequestData} ->
+				{Pid, _RequestData} ->
 					Pid ! {data, RawData};
 				_ ->
 					log(log_error, "Data to flow ~p failed: No PID associated.", [FlowID])
 			end,
-			{nextstate, relay, Context};
-		{ctl, framer, open, [Prio, FlowID, RequestData]} ->
-			Pid = framer:create(context(trunker_hub, Context), Prio, FlowID, RequestData),
-			put(FlowID, {Pid, Prio, RequestData}),
-			{nextstate, relay, Context};
-		{ctl, framer, close, [FlowID]}=Msg ->
+			{next_state, relay, Context};
+		{ctl, flow, open, [FlowID, RequestData]} ->
+			{ok, Pid} = flow_end:start_link(context(trunker_hub, Statics), {{10,210,74,190}, 80}, FlowID),
+			put(FlowID, {Pid, RequestData}),
+			{next_state, relay, Context};
+		{ctl, flow, close, [FlowID]}=Msg ->
 			case get(FlowID) of
-				{Pid, _Prio, _RequestData} ->
+				{Pid, _RequestData} ->
 					Pid ! Msg,
-					{nextstate, relay, Context};
+					{next_state, relay, Context};
 				_ ->
-					log(log_error, "ctl_framer_close(~p) failed: No PID associated.", [FlowID]),
-					{nextstate, relay, Context}
+					log(log_error, "ctl_flow_close(~p) failed: No PID associated.", [FlowID]),
+					{next_state, relay, Context}
 			end;
 		{ctl, Level, Code, Args} ->
 			log(log_info, "Unknown control message: ~p/~p(~p).", [Level, Code, Args]),
@@ -113,6 +114,9 @@ relay({get_flowid, From}, Context) ->
 	end;
 relay({flowend_exit, FlowId}, Context) ->
 	erase(FlowId),
+	{next_state, relay, Context};
+relay(_Msg, Context) ->
+	log(log_error, "Trunk_end ignored unknown message: ~p", [_Msg]),
 	{next_state, relay, Context}.
 
 term(goto, State) ->
@@ -151,7 +155,6 @@ uniqid_slow(Id, List) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%
 
 trunker_hub(Client_socket, Config, Context) ->
-	%PrioQueue = prioqueue:new(8),
 	trunker_hub_loop(Client_socket, Config, padding_of_PrioQueue, Context).
 
 trunker_hub_loop(Client_socket, _Config, _PrioQueue, Context) ->
@@ -168,5 +171,5 @@ trunker_hub_loop(Client_socket, _Config, _PrioQueue, Context) ->
 	end.
 
 context(K, C) ->
-	config:config(K, C).
+	config:get(K, C).
 
