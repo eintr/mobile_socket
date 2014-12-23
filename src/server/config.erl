@@ -13,7 +13,7 @@
     {key_file, "conf/server.key"},
 
     {log_file, "var/log"},
-    {log_level, log_info},
+    {log_level, log_debug},
 
     {multiplex_ratio, 5},
 
@@ -22,7 +22,7 @@
 
     {upstreams, [
         {"10.75.12.0/24",80},
-        {"10.75.12.51",80}]}  ]).
+        {"10.75.12.60",80}]}  ]).
 
 -define(DEFAULT_CONFIG, [
 	{default, ?DEFAULT_L7_CONFIG}	]).
@@ -33,8 +33,12 @@ get(Key, Config) ->
         false -> false
     end.
 
+set([], Config) ->
+	Config;
 set({Key, Val}, Config) ->
-	lists:keystore(Key, 1, Config, {Key, Val}).
+	lists:keystore(Key, 1, Config, {Key, Val});
+set([H|T], Config) ->
+	set(T, set(H, Config)).
 
 kvlist_merge([], Background) ->
 	Background;
