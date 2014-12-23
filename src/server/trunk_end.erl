@@ -41,7 +41,7 @@ wait_for_ok(goto, {TrunkSocket, Config, Statics}=Context) ->
 					% Fine
 					log(log_info, "trunker_ok, got shared key: ~p", [SharedKey]),
 					ok = inet:setopts(TrunkSocket, [{active, true}]),
-					{next_state, relay, Context};
+					{next_state, relay, {TrunkSocket, Config, config:set({sharedkey, SharedKey}, Statics)}};
 				{ctl, trunk, failure, [Reason]} ->
 					%log(log_error, "Peer failed."),
 					{next_state, term, Context, 0};
@@ -52,25 +52,26 @@ wait_for_ok(goto, {TrunkSocket, Config, Statics}=Context) ->
 	end.
 
 relay({tcp_closed, TrunkSocket}, {TrunkSocket, Config, Statics}=Context) ->
-	log(log_info, "Trunk socket to ~p:~p closed, trunk_end terminate.", []),
+	log(log_info, "Trunk socket closed, trunk_end terminate.", []),
 	{next_state, term, Context};
 relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 	case frame:decode(Frame, Statics) of
-		{data, FlowID, RawData} ->
+		{data, FlowID, CryptFlag, RawData} ->
 			case get(FlowID) of
-				{Pid, _RequestData} ->
-					Pid ! {data, RawData};
+				{Pid} ->
+					log(log_debug, "Send ~p to ~p", [RawData, Pid]),
+					Pid ! {flowdata, RawData};
 				_ ->
 					log(log_error, "Data to flow ~p failed: No PID associated.", [FlowID])
 			end,
 			{next_state, relay, Context};
-		{ctl, flow, open, [FlowID, RequestData]} ->
-			{ok, Pid} = flow_end:start_link(context(trunker_hub, Statics), {{10,210,74,190}, 80}, FlowID),
-			put(FlowID, {Pid, RequestData}),
+		{ctl, flow, open, [FlowID, CryptFlag, RequestData]} ->
+			{ok, Pid} = flow_end:start_link(self(), {{10,210,74,190}, 80}, FlowID, CryptFlag, RequestData),
+			put(FlowID, {Pid}),
 			{next_state, relay, Context};
-		{ctl, flow, close, [FlowID]}=Msg ->
+		{ctl, flow, close, [FlowID, CryptFlag]}=Msg ->
 			case get(FlowID) of
-				{Pid, _RequestData} ->
+				{Pid} ->
 					Pid ! Msg,
 					{next_state, relay, Context};
 				_ ->
@@ -85,7 +86,7 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 			{next_state, relay, Context}
 	end;
 relay({flowdata, FlowID, CryptFlag, RawData}, {TrunkSocket, Config, Statics}=Context) ->
-	case frame:encode({data, FlowID, RawData}, context(sharedkey, Context)) of
+	case frame:encode({data, FlowID, CryptFlag, RawData}, Statics) of
 		{ok, Bin} ->
 			gen_tcp:send(TrunkSocket, Bin),
 			{next_state, relay, Context};
@@ -94,7 +95,7 @@ relay({flowdata, FlowID, CryptFlag, RawData}, {TrunkSocket, Config, Statics}=Con
 			{next_state, relay, Context}
 	end;
 relay({flowctl, Level, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
-	case frame:encode({ctl, Level, Code, Args}, context(sharedkey, Context)) of
+	case frame:encode({ctl, Level, Code, Args}, Statics) of
 		{ok, Bin} ->
 			gen_tcp:send(TrunkSocket, Bin),
 			{next_state, relay, Context};
@@ -153,22 +154,6 @@ uniqid_slow(Id, List) ->
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%
-
-trunker_hub(Client_socket, Config, Context) ->
-	trunker_hub_loop(Client_socket, Config, padding_of_PrioQueue, Context).
-
-trunker_hub_loop(Client_socket, _Config, _PrioQueue, Context) ->
-	receive
-		{ctl, Level, Code, Args} ->
-			case frame:encode({ctl, Level, Code, Args}, context(sharedkey, Context)) of
-				{ok, Bin} ->
-					gen_tcp:send(Client_socket, Bin);
-				{error, Reason} ->
-					log(log_error, "frame:encode() failed: ~s", [Reason])
-			end;
-		Msg ->
-			log(log_error, "trunker received unknown message: ~p", [Msg])
-	end.
 
 context(K, C) ->
 	config:get(K, C).
