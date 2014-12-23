@@ -46,17 +46,19 @@ recv_config(_UnkownMsg, State) ->
 
 trunk_ok(goto, {TrunkSocket, Config, Context}=_State) ->
 	Shared_key = <<"RandomSharedKey">>,
+	NewContext = config:set({sharedkey, Shared_key}, Context),
 	Encrypted_shared_key = mycrypt:encrypt_shared_key(Shared_key, config:get(pub_key, Context)),
-	{ok, Bin} = frame:encode({ctl, trunk, ok, [Encrypted_shared_key]}, Context),
+	{ok, Bin} = frame:encode({ctl, trunk, ok, [Encrypted_shared_key]}, NewContext),
 	ok = gen_tcp:send(TrunkSocket, Bin),
 	io:format("CTL_TRUNC_OK sent.\n"),
-	create_flow(goto, {TrunkSocket, Config, config:set({sharedkey, Shared_key}, Context)}).
+	create_flow(goto, {TrunkSocket, Config, NewContext}).
 
 create_flow(goto, {TrunkSocket, _Config, Context}=State) ->
-	{ok, Bin} = frame:encode({ctl, flow, open, [1, <<"HTTP Header things...">>]}, Context),
+	NewContext = config:set({cryptflag, 1}, Context),
+	{ok, Bin} = frame:encode({ctl, flow, open, [1, 1, <<"GET /\r\n\r\n">>]}, NewContext),
 	ok = gen_tcp:send(TrunkSocket, Bin),
 	io:format("CTL_FLOW_OPEN msg sent:~p\n", [Bin]),
-	{next_state, main_loop, State, 15000}.
+	{next_state, main_loop, {TrunkSocket, _Config, NewContext}, 15000}.
 
 main_loop(timeout, State) ->
 	io:format("Did not get any data in 5 secends, continue...\n"),
