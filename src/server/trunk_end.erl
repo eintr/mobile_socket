@@ -14,21 +14,24 @@ start_link(TrunkSocket, Config) ->
 	gen_fsm:start_link(?MODULE, [TrunkSocket, Config], []).
 
 init([TrunkSocket, Config]) ->
+	ok = crypto:start(),
 	{ok, wait_for_socket, {TrunkSocket, Config, [{flowid, []}]}}.
 
 wait_for_socket({socket_ready, TrunkSocket}, {TrunkSocket, Config, Context}=State) ->
 	gen_tcp:controlling_process(TrunkSocket, self()),
 	inet:setopts(TrunkSocket, [{active, false}, {packet, 2}, binary]),
 	io:format("Serving client: ~p\n", [inet:peernames(TrunkSocket)]),
-	send_config(goto, {TrunkSocket, Config, config:set(	{connect_time, 'TODO'}, Context++[{pubkey, <<"Fake pubkey">>}, {privkey, <<"Fake privkey">>}])});
+	send_config(goto, {TrunkSocket, Config, config:set({connect_time, 'TODO'}, Context)});
 wait_for_socket(_UnkownMsg, State) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
 	{next_state, wait_for_socket, State}.
 
 send_config(goto, {TrunkSocket, Config, Context}=State) ->
-	{ok, Frame} = frame:encode({ctl, trunk, config, [<<"====[Fake certificate]====", 0:8>>] }, Context),
+	{ok, PrivKey} = mycrypt:load_privkey("key/test.key"),
+	{ok, CertBin} = mycrypt:load_x509("key/test.crt"),
+	{ok, Frame} = frame:encode({ctl, trunk, config, [CertBin]}, Context),
 	ok = gen_tcp:send(TrunkSocket, Frame),
-	wait_for_ok(goto, State);
+	wait_for_ok(goto, {TrunkSocket, Config, Context++[{privkey, PrivKey}]});
 send_config(_UnkownMsg, Context) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
 	{next_state, term, Context, 0}.
@@ -36,7 +39,7 @@ send_config(_UnkownMsg, Context) ->
 wait_for_ok(goto, {TrunkSocket, Config, Statics}=Context) ->
 	case gen_tcp:recv(TrunkSocket, 0) of
 		{ok, Packet} ->
-			case frame:decode(Packet, [])	of
+			case frame:decode(Packet, Statics)	of
 				{ctl, trunk, ok, [SharedKey]} ->
 					% Fine
 					log(log_info, "trunker_ok, got shared key: ~p", [SharedKey]),
@@ -66,6 +69,7 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 			end,
 			{next_state, relay, Context};
 		{ctl, flow, open, [FlowID, CryptFlag, RequestData]} ->
+			io:format("Received ctl/flow/open with CryptFlag=~p\n", [CryptFlag]),
 			{ok, Pid} = flow_end:start_link(self(), {{10,210,74,190}, 80}, FlowID, CryptFlag, RequestData),
 			put(FlowID, {Pid}),
 			{next_state, relay, Context};

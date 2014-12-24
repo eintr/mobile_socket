@@ -38,7 +38,7 @@ decode(v1, Packet, Context) ->
 encode(v1, {data, FlowID, CryptFlag, RawData}, Context) ->
 	RawBody = <<0:1/big-integer, FlowID:31/big-integer, RawData/binary >>,
 	CryptedBody =  mycrypt:encrypt_frame_body(RawBody, CryptFlag, config:get(sharedkey, Context)),
-	{ok, <<1:8/big-integer, 1:3/big-integer, 0:5/big-integer, CryptedBody/binary>>};
+	{ok, <<1:8/big-integer, CryptFlag:3/big-integer, 0:5/big-integer, CryptedBody/binary>>};
 encode(v1, {ctl, trunk, config, [Certificate]}, _Context) ->
 	Frame_body = <<1:1/big-integer, ?OP_TRUNK_CONFIG:31/big-integer, Certificate/binary >>,
 	{ok, <<1:8/big-integer, 0:3/big-integer, 0:5/big-integer, Frame_body/binary>>};

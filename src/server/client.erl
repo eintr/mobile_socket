@@ -22,6 +22,7 @@ start_link({IP, Port}, Config) ->
 	gen_fsm:start_link(?MODULE, [{IP, Port}, Config], []).
 
 init([{IP, Port}, Config]) ->
+	ok = crypto:start(),
 	{ok, Socket} = gen_tcp:connect(IP, Port, [binary, {packet, 2}, {active, false}]),
 	io:format("Connected to ~p:~p\n", [IP, Port]),
 	{ok, prepare, {Socket, Config, []}}.
@@ -34,9 +35,8 @@ recv_config({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Context}=_State) ->
 	io:format("recv_config({tcp, ...)\n"),
 	case frame:decode(Frame, Context) of
 		{ctl, trunk, config, Certificate} ->
-			% Extract pub_key from Certificate
 			io:format("Server certificate is:~p\n", [Certificate]),
-			trunk_ok(goto, {TrunkSocket, Config, config:set({pub_key, <<"PubKey">>}, Context)});
+			trunk_ok(goto, {TrunkSocket, Config, config:set({pub_key, mycrypt:extract_pubkey(Certificate)}, Context)});
 		Msg ->
 			io:format("Got a ~p while expecting {ctl, trunk, config}\n", [Msg])
 	end;
@@ -45,7 +45,8 @@ recv_config(_UnkownMsg, State) ->
 	term(goto, State).
 
 trunk_ok(goto, {TrunkSocket, Config, Context}=_State) ->
-	Shared_key = <<"RandomSharedKey">>,
+	Shared_key = mycrypt:rand_sharedkey(),
+	io:format("Random sharedkey=~p\n", [Shared_key]),
 	NewContext = config:set({sharedkey, Shared_key}, Context),
 	Encrypted_shared_key = mycrypt:encrypt_shared_key(Shared_key, config:get(pub_key, Context)),
 	{ok, Bin} = frame:encode({ctl, trunk, ok, [Encrypted_shared_key]}, NewContext),
@@ -53,9 +54,9 @@ trunk_ok(goto, {TrunkSocket, Config, Context}=_State) ->
 	io:format("CTL_TRUNC_OK sent.\n"),
 	create_flow(goto, {TrunkSocket, Config, NewContext}).
 
-create_flow(goto, {TrunkSocket, _Config, Context}=State) ->
+create_flow(goto, {TrunkSocket, _Config, Context}=_State) ->
 	NewContext = config:set({cryptflag, 1}, Context),
-	{ok, Bin} = frame:encode({ctl, flow, open, [1, 1, <<"GET /\r\n\r\n">>]}, NewContext),
+	{ok, Bin} = frame:encode({ctl, flow, open, [1, 2, <<"GET /\r\n\r\n">>]}, NewContext),
 	ok = gen_tcp:send(TrunkSocket, Bin),
 	io:format("CTL_FLOW_OPEN msg sent:~p\n", [Bin]),
 	{next_state, main_loop, {TrunkSocket, _Config, NewContext}, 15000}.
@@ -104,7 +105,6 @@ handle_event(Event, StateName, State) ->
 	{stop, "terminate!", State}.
 
 handle_info(Info, StateName, State) ->
-	io:format("Received info ~p in state ~p\n", [Info, StateName]),
 	?MODULE:StateName(Info, State).
 
 handle_sync_event(Event, _From, StateName, State) ->
