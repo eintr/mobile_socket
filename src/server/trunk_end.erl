@@ -14,7 +14,6 @@ start_link(TrunkSocket, Config) ->
 	gen_fsm:start_link(?MODULE, [TrunkSocket, Config], []).
 
 init([TrunkSocket, Config]) ->
-	ok = crypto:start(),
 	{ok, wait_for_socket, {TrunkSocket, Config, [{flowid, []}]}}.
 
 wait_for_socket({socket_ready, TrunkSocket}, {TrunkSocket, Config, Context}=State) ->
@@ -69,7 +68,7 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 			end,
 			{next_state, relay, Context};
 		{ctl, flow, open, [FlowID, CryptFlag, RequestData]} ->
-			io:format("Received ctl/flow/open with CryptFlag=~p\n", [CryptFlag]),
+			log(log_info, "~p: Creating flow_end for id ~p with CryptFlag=~p", [?MODULE, FlowID, CryptFlag]),
 			{ok, Pid} = flow_end:start_link(self(), {{10,210,74,190}, 80}, FlowID, CryptFlag, RequestData),
 			put(FlowID, {Pid}),
 			{next_state, relay, Context};
@@ -101,6 +100,7 @@ relay({flowdata, FlowID, CryptFlag, RawData}, {TrunkSocket, Config, Statics}=Con
 relay({flowctl, Level, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
 	case frame:encode({ctl, Level, Code, Args}, Statics) of
 		{ok, Bin} ->
+			log(log_error, "Sending ~p into trunk_socket.", [{ctl, Level, Code, Args}]),
 			gen_tcp:send(TrunkSocket, Bin),
 			{next_state, relay, Context};
 		{error, Reason} ->
