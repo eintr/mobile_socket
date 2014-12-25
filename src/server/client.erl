@@ -1,6 +1,29 @@
 -module(client).
 -behaviour(gen_fsm).
 
+-include_lib("public_key/include/public_key.hrl").
+
+-define(PREINSTALLED_CERT, <<"
+-----BEGIN CERTIFICATE-----
+MIIC5DCCAk2gAwIBAgIJAK6g3HiskNGKMA0GCSqGSIb3DQEBCwUAMIGKMQswCQYD
+VQQGEwJDTjEQMA4GA1UECAwHQmVpamluZzEQMA4GA1UEBwwHQmVpamluZzEOMAwG
+A1UECgwFV2VpYm8xDzANBgNVBAsMBmVybGFuZzENMAsGA1UEAwwESm9objEnMCUG
+CSqGSIb3DQEJARYYaGFpcWluZzFAc3RhZmYud2VpYm8uY29tMB4XDTE0MTIyNDA3
+MDcxNloXDTQyMDUxMTA3MDcxNlowgYoxCzAJBgNVBAYTAkNOMRAwDgYDVQQIDAdC
+ZWlqaW5nMRAwDgYDVQQHDAdCZWlqaW5nMQ4wDAYDVQQKDAVXZWlibzEPMA0GA1UE
+CwwGZXJsYW5nMQ0wCwYDVQQDDARKb2huMScwJQYJKoZIhvcNAQkBFhhoYWlxaW5n
+MUBzdGFmZi53ZWliby5jb20wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJAoGBAJ32
+5Sa8X8VbxpX+5gjVm9b3uJKKJeCpAGu7dcqgzCpnFAqWwcZWzc31kzJsQzoYZwG/
+BmB0vevYuMbAJcBQ/NnzKwifaCXdR1o55gA5goeCkiZVtIR9LinKEgFzN4QqZSrt
+lF5gCVRslGkIDJFJDOfhT6c85MXTC9hZihpeMIS9AgMBAAGjUDBOMB0GA1UdDgQW
+BBThCk2eoN+F9LodfGtcNYaHPRmGmjAfBgNVHSMEGDAWgBThCk2eoN+F9LodfGtc
+NYaHPRmGmjAMBgNVHRMEBTADAQH/MA0GCSqGSIb3DQEBCwUAA4GBAJVRXYV3d2ou
+D40YUseGZjy7XX0vLfIRc1OiWY5Wv+Fri0b3TljQbJrI81vBtCUP5FkzczRaPOSf
+tkBpLm6eoPGAKPmmXBw2WKI2HvHcwb98n4J9it/IlIUIJ7PoUIvHveXR2bTpH1qj
+TmMrnjGdXB4RLwofb5L5VutQYblOq/Hg
+-----END CERTIFICATE-----
+">>).
+
 -export([run/0, start_link/2]).
 -export([init/1, code_change/4, handle_event/3, handle_info/3, handle_sync_event/4, terminate/3]).
 -export([prepare/2, recv_config/2, trunk_ok/2, create_flow/2, main_loop/2, term/2]).
@@ -23,23 +46,34 @@ start_link({IP, Port}, Config) ->
 
 init([{IP, Port}, Config]) ->
 	ok = crypto:start(),
+	[{'Certificate', Cert, not_encrypted}] = public_key:pem_decode(?PREINSTALLED_CERT),
+	CertRec = public_key:pkix_decode_cert(Cert, otp),
+	CA_PUBKEY = ((CertRec#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo)#'OTPSubjectPublicKeyInfo'.subjectPublicKey,
+	io:format("Loaded CA pubkey: ~p\n", [CA_PUBKEY]),
 	{ok, Socket} = gen_tcp:connect(IP, Port, [binary, {packet, 2}, {active, false}]),
 	io:format("Connected to ~p:~p\n", [IP, Port]),
-	{ok, prepare, {Socket, Config, []}}.
+	{ok, prepare, {Socket, Config, [{ca_pubkey, CA_PUBKEY}]}}.
 
-prepare(go, {TrunkSocket, Config, _Context}=_State) ->
+prepare(go, {TrunkSocket, Config, Context}=_State) ->
 	inet:setopts(TrunkSocket, [{active, true}]),
-	{next_state, recv_config, {TrunkSocket, Config, [{flowtable, []}]}, infinity}.
+	{next_state, recv_config, {TrunkSocket, Config, Context++[{flowtable, []}]}}.
 
 recv_config({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Context}=_State) ->
 	io:format("recv_config({tcp, ...)\n"),
 	case frame:decode(Frame, Context) of
 		{ctl, trunk, config, Certificate} ->
-			io:format("Server certificate is:~p\n", [Certificate]),
-			trunk_ok(goto, {TrunkSocket, Config, config:set({pub_key, mycrypt:extract_pubkey(Certificate)}, Context)});
+			%[{'Certificate', Cert, not_encrypted}] = public_key:pem_decode(Certificate),
+			case public_key:pkix_verify(Certificate, config:get(ca_pubkey, Context)) of
+				false -> {stop, "Certificate verify failed."};
+				true ->
+					io:format("Certificate verify Passed.\n"),
+					trunk_ok(goto, {TrunkSocket, Config, config:set({pub_key, mycrypt:extract_pubkey(Certificate)}, Context)})
+			end;
 		Msg ->
 			io:format("Got a ~p while expecting {ctl, trunk, config}\n", [Msg])
 	end;
+recv_config({tcp_closed, TrunkSocket}, {TrunkSocket, Config, Context}=_State) ->
+	{stop, "Peer closed."};
 recv_config(_UnkownMsg, State) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
 	term(goto, State).
