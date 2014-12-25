@@ -71,14 +71,16 @@ handle_cast('EXIT', {LogFile, _LeastLevel, _GenConfig}=State) ->
 handle_info(_, State) ->
 	{noreply, State}.
 
-prepend_time(String) ->
-	timestamp()++" -- "++String++"\n".
-
 code_change(_OldVsn, State, _Extra) ->
 	{ok, State}.
 
 terminate(_Reason, _State) ->
 	ok.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%5
+
+prepend_time(String) ->
+	timestamp()++" -- "++String++"\n".
 
 timestamp() ->
 	{{Year, Month, Day}, {Hour, Minute, Second}} = calendar:local_time(),
