@@ -1,15 +1,17 @@
 -module(l7_server).
 -behaviour(gen_server).
 
+-import(log, [log/2, log/3]).
+
 -export([start_link/2]).
 -export([init/1, handle_info/2, handle_cast/2, handle_call/3, terminate/2, code_change/3]).
 
 start_link(SockAddr, L7Config) ->
-	io:format("~p:start_link(~p, ~p)\n", [?MODULE, SockAddr, L7Config]),
 	gen_server:start_link(?MODULE, [SockAddr, L7Config], []).
 
 init([{Addr, Port}, L7Config]) ->
-    io:format("Try to Listen: {~p, ~b} with config ~p\n", [Addr, Port, L7Config]),
+    %io:format("Try to Listen: {~p, ~b} with config ~p\n", [Addr, Port, L7Config]),
+	process_flag(trap_exit, true),
 	case gen_tcp:listen(Port, [binary, {ip, Addr}, {packet, 0}, {reuseaddr, true}, {keepalive, true}, {backlog, 30}, {active, false}]) of
 		{ok, ListenSocket} ->
 			io:format("gen_tcp:listen(): OK\n"),
@@ -20,16 +22,15 @@ init([{Addr, Port}, L7Config]) ->
 	end.
 
 handle_info({'EXIT', TrunkPid, _Reason}, {ListenSocket, Ref, Config, Context}=_State) ->
+	log(log_info, "Detected trunk_end ~p exited, unregister it.", [TrunkPid]),
 	{noreply, {ListenSocket, Ref, Config, lists:keydelete(TrunkPid, 2, Context)}};
 handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, _Context}=State) ->
-	io:format("Got connection from: ~p\n", [inet:peernames(TrunkSocket)]),
+	log(log_info, "Got connection from: ~p\n", [inet:peernames(TrunkSocket)]),
 	{ok, Pid} = trunk_end:start_link(TrunkSocket, Config),
 	
 	set_sockopt(ListenSocket, TrunkSocket),
 	gen_tcp:controlling_process(TrunkSocket, Pid),
 	gen_fsm:send_event(Pid, {socket_ready, TrunkSocket}),
-	%gen_tcp:send(TrunkSocket, "Hello!\n"),
-	%gen_tcp:close(TrunkSocket),
 
 	%% Signal the network driver that we are ready to accept another connection
 	case prim_inet:async_accept(ListenSocket, -1) of
