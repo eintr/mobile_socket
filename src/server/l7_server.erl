@@ -14,9 +14,7 @@ init([{Addr, Port}, L7Config]) ->
 	process_flag(trap_exit, true),
 	case gen_tcp:listen(Port, [binary, {ip, Addr}, {packet, 0}, {reuseaddr, true}, {keepalive, true}, {backlog, 30}, {active, false}]) of
 		{ok, ListenSocket} ->
-			io:format("gen_tcp:listen(): OK\n"),
 			{ok, Ref} = prim_inet:async_accept(ListenSocket, -1),
-			io:format("prim_inet:async_accept()=~p, OK\n", [Ref]),
 			{ok, {ListenSocket, Ref, L7Config, []}};
 		{error, Reason} -> {stop, Reason}
 	end.
@@ -34,13 +32,14 @@ handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, R
 
 	%% Signal the network driver that we are ready to accept another connection
 	case prim_inet:async_accept(ListenSocket, -1) of
-		{ok,    NewRef} -> ok;
-		{error, NewRef} -> exit({async_accept, inet:format_error(NewRef)})
-	end,
-	{noreply, {ListenSocket, NewRef, Config, State}};
-handle_info(_UnknwonInfo, Context) ->
-	io:format("Got unkown info: ~p\n", [_UnknwonInfo]),
-    {noreply, Context}.
+		{ok,    NewRef} -> 
+			{noreply, {ListenSocket, NewRef, Config, State}};
+		{error, NewRef} ->
+			{stop, {async_accept, inet:format_error(NewRef)}, State}
+	end;
+handle_info(_UnknwonInfo, State) ->
+	log(log_error, "Got unkown info: ~p", [_UnknwonInfo]),
+    {noreply, State}.
 
 handle_call(Request, _From, Context) ->
     {stop, {unknown_call, Request}, Context}.
