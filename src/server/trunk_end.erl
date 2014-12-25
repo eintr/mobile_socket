@@ -97,10 +97,10 @@ relay({flowdata, FlowID, CryptFlag, RawData}, {TrunkSocket, Config, Statics}=Con
 			log(log_error, "frame:encode() failed: ~s, frame dropped.", [Reason]),
 			{next_state, relay, Context}
 	end;
-relay({flowctl, Level, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
-	case frame:encode({ctl, Level, Code, Args}, Statics) of
+relay({flowctl, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
+	case frame:encode({ctl, flow, Code, Args}, Statics) of
 		{ok, Bin} ->
-			log(log_error, "Sending ~p into trunk_socket.", [{ctl, Level, Code, Args}]),
+			log(log_error, "Sending ~p into trunk_socket.", [{ctl, flow, Code, Args}]),
 			gen_tcp:send(TrunkSocket, Bin),
 			{next_state, relay, Context};
 		{error, Reason} ->
@@ -131,8 +131,11 @@ terminate(Reason, _StateName, {TrunkSocket, _Config, _Statics}) ->
     gen_tcp:close(TrunkSocket),
     io:format("Trunc_end is terminating from reason: ~p\n", [Reason]).
 
-handle_info(Info, StateName, State) ->
-	?MODULE:StateName(Info, State).
+handle_info({'EXIT', FromPID, Reason}, StateName, {TrunkSocket, Config, Statics}=Context) ->
+	log(log_info, "trunk_end: Detected flow_end ~p exited.", [FromPID]),
+	{next_state, StateName, Context};
+handle_info(Info, StateName, Context) ->
+	?MODULE:StateName(Info, Context).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
