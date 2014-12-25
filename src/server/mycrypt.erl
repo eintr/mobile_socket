@@ -12,11 +12,11 @@
 
 -import(log, [log/2, log/3]).
 
+% FIXME: load_x509(Fname) and extract_pubkey(CertBin) is ugly, fix it.
 load_x509(Fname) ->
 	{ok, PemBin} = file:read_file(Fname),
 	[{'Certificate', Cert, not_encrypted}] = public_key:pem_decode(PemBin),
 	{ok, Cert}.
-
 extract_pubkey(CertBin) ->
 	CertRec = public_key:pkix_decode_cert(CertBin, otp),
 	((CertRec#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo)#'OTPSubjectPublicKeyInfo'.subjectPublicKey.
