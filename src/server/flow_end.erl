@@ -23,13 +23,15 @@ relay({tcp, Upstream, Data}, {TrunkEnd, Upstream, FlowID, CryptFlag, _Context}=S
 	TrunkEnd ! {flowdata, FlowID, CryptFlag, Data},
 	{next_state, relay, State};
 relay({tcp_closed, Upstream}, {TrunkEnd, Upstream, FlowID, CryptFlag, _Context}=State) ->
-	TrunkEnd ! {flowctl, close, FlowID, CryptFlag},
-	{stop, "Upstream closed.", State};
+	TrunkEnd ! {flowctl, close, [FlowID, CryptFlag]},
+	log(log_info, "Upstream(~p) closed.", [Upstream]),
+	{stop, normal, State};
 relay({flowdata, Data}, {_TrunkEnd, Upstream, _FlowID, CryptFlag, _Context}=State) ->
 	ok = gen_tcp:send(Upstream, Data),
 	{next_state, relay, State};
 relay({flowctl, close}, State) ->
-	{stop, "Got flow_end close request.", State};
+	log(lof_info, "flow_end: Got close request."),
+	{stop, normal, State};
 relay(_Msg, State) ->
 	log(log_error, "Ignored unknown message: ~p", [_Msg]),
 	{next_state, relay, State}.
