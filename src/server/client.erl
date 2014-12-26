@@ -2,6 +2,12 @@
 -behaviour(gen_fsm).
 
 -include_lib("public_key/include/public_key.hrl").
+-include_lib("kernel/include/inet.hrl").
+
+-export([run/0, start_link/2]).
+-export([init/1, code_change/4, handle_event/3, handle_info/3, handle_sync_event/4, terminate/3]).
+-export([prepare/2, recv_config/2, trunk_ok/2, create_flow/2, main_loop/2]).
+
 
 -define(PREINSTALLED_CERT, <<"
 -----BEGIN CERTIFICATE-----
@@ -23,12 +29,6 @@ tkBpLm6eoPGAKPmmXBw2WKI2HvHcwb98n4J9it/IlIUIJ7PoUIvHveXR2bTpH1qj
 TmMrnjGdXB4RLwofb5L5VutQYblOq/Hg
 -----END CERTIFICATE-----
 ">>).
-
--export([run/0, start_link/2]).
--export([init/1, code_change/4, handle_event/3, handle_info/3, handle_sync_event/4, terminate/3]).
--export([prepare/2, recv_config/2, trunk_ok/2, create_flow/2, main_loop/2, term/2]).
-
--include_lib("kernel/include/inet.hrl").
 
 
 run() ->
@@ -76,7 +76,7 @@ recv_config({tcp_closed, TrunkSocket}, {TrunkSocket, Config, Context}=_State) ->
 	{stop, "Peer closed."};
 recv_config(_UnkownMsg, State) ->
 	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
-	term(goto, State).
+	{stop, normal, State}.
 
 trunk_ok(goto, {TrunkSocket, Config, Context}=_State) ->
 	Shared_key = mycrypt:rand_sharedkey(),
@@ -90,9 +90,14 @@ trunk_ok(goto, {TrunkSocket, Config, Context}=_State) ->
 
 create_flow(goto, {TrunkSocket, _Config, Context}=_State) ->
 	NewContext = config:set({cryptflag, 1}, Context),
-	{ok, Bin} = frame:encode({ctl, flow, open, [1, 2, <<"GET /\r\n\r\n">>]}, NewContext),
+	{ok, Bin} = frame:encode({ctl, flow, open, [1, 2, <<>>]}, NewContext),
 	ok = gen_tcp:send(TrunkSocket, Bin),
-	io:format("CTL_FLOW_OPEN msg sent:~p\n", [Bin]),
+	io:format("CTL_FLOW_OPEN msg sent\n"),
+
+	{ok, Bin2} = frame:encode({data, 1, 2, <<"GET /1.php\r\n\r\n">>}, NewContext),
+	ok = gen_tcp:send(TrunkSocket, Bin2),
+	io:format("HTTP Req msg sent~p\n", [Bin]),
+
 	{next_state, main_loop, {TrunkSocket, _Config, NewContext}, 15000}.
 
 main_loop(timeout, State) ->
@@ -100,31 +105,28 @@ main_loop(timeout, State) ->
 	{next_state, main_loop, State, 15000};
 main_loop({tcp_closed, TrunkSocket}, {TrunkSocket, _Config, _Context}=State) ->
 	io:format("Socket closed by peer.\n"),
-	{next_state, term, State};
+	{stop, normal, State};
 main_loop({tcp, TrunkSocket, Frame}, {TrunkSocket, _Config, Context}=State) ->
 	case frame:decode(Frame, Context) of
-		{data, 1, Data} ->
+		{data, 1, CryptFlag, Data} ->
 			io:format("Got data: ~p\n", [Data]),
 			{next_state, main_loop, State, 5000};
-		{data, Flowid, Data} ->
+		{data, Flowid, CryptFlag, Data} ->
 			io:format("?? Got data in incorrect flowid(~p): ~p\n", [Flowid, Data]),
 			{next_state, main_loop, State, 5000};
 		{ctl, trunk, failure, [ErrorMsg]} ->
 			io:format("?? Trunk failed:~p\n", [ErrorMsg]),
-			term(goto, State);
-		{ctl, flow, close, [1]} ->
-			io:format("Flow closed normally.\n"),
-			term(goto, State);
+			{stop, normal, State};
+		{ctl, flow, close, _} ->
+			io:format("Received {ctl, flow, close, _}.\n"),
+			{stop, normal, State};
 		{ctl, flow, failure, [FlowID, ErrorMsg]} ->
 			io:format("Flow ~p closed abnormally: ~p\n", [FlowID, ErrorMsg]),
-			term(goto, State);
+			{stop, normal, State};
 		_Msg ->
 			io:format("Unknown Message:~p\n", [_Msg]),
 			{next_state, main_loop, State, 5000}
 	end.
-
-term(goto, State) ->
-	{stop, "terminate!", State}.
 
 terminate(Reason, _StateName, {TrunkSocket, _Config, _Context}=_State) ->
 	gen_tcp:close(TrunkSocket),
