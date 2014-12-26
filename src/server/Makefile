@@ -1,6 +1,6 @@
 include ../config.mk
 
-sources=l7_server.erl  l7_sup.erl config.erl log.erl mycrypt.erl frame.erl trunk_end.erl client.erl flow_end.erl
+sources=l7_server.erl  l7_sup.erl config.erl log.erl mycrypt.erl frame.erl socket_end.erl client.erl pipeline_end.erl
 
 beams=$(sources:.erl=.beam)
 

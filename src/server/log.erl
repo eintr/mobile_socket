@@ -54,7 +54,6 @@ handle_call('EXIT', _From, {LogFile, _LeastLevel, _GenConfig}=State) ->
 	{stop, "", State}.
 
 handle_cast({log, Level, Format, ArgList}, {LogFile, LeastLevel, _GenConfig}=State) ->
-	io:format("Got a log cast!\n"),
 	{LogLevelString, LogValue} = get(Level),
 	if
 		LogValue>=LeastLevel ->
@@ -66,7 +65,7 @@ handle_cast({log, Level, Format, ArgList}, {LogFile, LeastLevel, _GenConfig}=Sta
 handle_cast('EXIT', {LogFile, _LeastLevel, _GenConfig}=State) ->
 	{LogLevelString, _LogValue} = get(log_info),
 	io:format(LogFile, prepend_time(io_lib:format(LogLevelString++": "++"log service exit.")), []),
-	{stop, "", State}.
+	{stop, normal, State}.
 
 handle_info(_, State) ->
 	{noreply, State}.

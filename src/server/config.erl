@@ -21,8 +21,13 @@
     {recv_timeout, 2000},
 
     {upstreams, [
-        {"10.75.12.0/24",80},
-        {"10.75.12.60",80}]}  ]).
+        {{"10.75.12.51",80}, [	{weight, 1},
+								{max_conns, 1000},
+								resolve	]},
+        {{"10.75.12.60",80}, [	{weight, 2},
+								{max_conns, infinite},
+								resolve]}
+	]}  ]).
 
 -define(DEFAULT_CONFIG, [
 	{default, ?DEFAULT_L7_CONFIG}	]).
@@ -45,15 +50,20 @@ kvlist_merge([], Background) ->
 kvlist_merge([{K, V}|T], Background) ->
 	kvlist_merge(T, lists:keystore(K, 1, Background, {K, V})).
 
+load_conf(default) ->
+	conf_postprocess(?DEFAULT_CONFIG);
 load_conf([$/|_]=Filename) ->
 	io:format("Load config file: ~p\n", [Filename]),
 	{ok, Value} = file:script(Filename),
 	%io:format("Raw: ~p\n", [Value]),
 	Conf = kvlist_merge(Value, ?DEFAULT_CONFIG),
 	%io:format("Combined with default: ~p\n", [Conf]),
-	Logfile_replaced = lists:keyreplace(log_file, 1, Conf, {log_file, ?PREFIX++"/"++get(log_file, Conf)}),
-	io:format("Config loaded: ~p\n", [Logfile_replaced]),
-	Logfile_replaced;
+	conf_postprocess(Conf);
 load_conf([Filename]) ->
 	load_conf(?PREFIX++"/"++atom_to_list(Filename)).
+
+conf_postprocess(Conf) ->
+	Logfile_replaced = lists:keyreplace(log_file, 1, Conf, {log_file, ?PREFIX++"/"++get(log_file, Conf)}),
+	io:format("Config loaded: ~p\n", [Logfile_replaced]),
+	Logfile_replaced.
 

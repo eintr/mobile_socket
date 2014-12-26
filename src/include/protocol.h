@@ -43,7 +43,6 @@ enum opcode_enum {
 struct frame_body_ctl_socket_cert_req_st {	/* client to server */
 	uint16_t msg_type:1;	/* Must == 1 */
 	uint16_t opcode:15;		/* Must == OP_SOCKET_CERT_REQ */
-	uint8_t x509_certificate[0];
 } __attribute__((packed));
 
 struct frame_body_ctl_socket_cert_st {	/* server to client */
