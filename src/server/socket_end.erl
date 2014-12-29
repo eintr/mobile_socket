@@ -80,13 +80,13 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 			{ok, Pid} = pipeline_end:start_link(self(), {{10,210,74,190}, 80}, PipelineCFG),
 			put(FlowID, {Pid}),
 			{next_state, relay, Context};
-		{ctl, pipeline, close, {FlowID}}=Msg ->
+		{ctl, pipeline, close, {FlowID, CryptFlag, Zip}}=Msg ->
 			case get(FlowID) of
 				{Pid} ->
 					Pid ! Msg,
 					{next_state, relay, Context};
 				_ ->
-					log(log_error, "ctl_flow_close(~p) failed: No PID associated.", [FlowID]),
+					log(log_error, "ctl_pipeline_close(~p) failed: No PID associated.", [FlowID]),
 					{next_state, relay, Context}
 			end;
 		{ctl, Level, Code, Args} ->
@@ -123,9 +123,9 @@ relay({flowdata, FlowID, 0, Zip, RawData}, {TrunkSocket, Config, Statics}=Contex
 			{next_state, relay, Context}
 	end;
 relay({flowctl, Code, Args}, {TrunkSocket, Config, Statics}=Context) ->
-	case frame:encode({ctl, flow, Code, Args}, Statics) of
+	case frame:encode({ctl, pipeline, Code, Args}, Statics) of
 		{ok, Bin} ->
-			log(log_info, "Sending ~p into trunk_socket.", [{ctl, flow, Code, Args}]),
+			log(log_info, "Sending ~p into trunk_socket.", [{ctl, pipeline, Code, Args}]),
 			ok = gen_tcp:send(TrunkSocket, Bin),
 			{next_state, relay, Context};
 		{error, Reason} ->

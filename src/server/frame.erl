@@ -27,9 +27,10 @@ decode(v1, Packet, Context) ->
 		<<1:1/big-integer, ?OP_SOCKET_KEY_REJ:15/big-integer, _/binary>> ->
 			{ctl, socket, key_rej, {}};
 		<<1:1/big-integer, ?OP_PIPELINE_OPEN:15/big-integer, FlowID:16/big-integer, MaxDelay:16/big-integer, ReplyFLag:8/big-integer, Data/binary>> ->
-			{ctl, flow, open, {FlowID, Encrypt, Zip, MaxDelay, ReplyFLag, Data}};
+			%io:format("<<~s>>~n", [[io_lib:format("~2.16.0B",[X]) || <<X:8>> <= FrameBody ]]),
+			{ctl, pipeline, open, {FlowID, Encrypt, Zip, MaxDelay, ReplyFLag, Data}};
 		<<1:1/big-integer, ?OP_PIPELINE_CLOSE:15/big-integer, FlowID:16/big-integer>> ->
-			{ctl, flow, close, {FlowID}};
+			{ctl, pipeline, close, {FlowID}};
 		% TODO: to be continued.
 		_ ->
 			{error, "Unknown Frame format."}
@@ -63,13 +64,13 @@ encode(v1, {ctl, socket, key_rej, _}, _Context) ->
 encode(v1, {ctl, pipeline, open, {FlowID, CryptFlag, Zip, MaxDelay, ReplyFlags, Data}}, Context) ->
 	Rawbody = <<	1:1/big-integer,
 					?OP_PIPELINE_OPEN:15/big-integer,
-					FlowID:32/big-integer,
+					FlowID:16/big-integer,
 					MaxDelay:16/big-integer,
-					ReplyFlags:16/big-integer,
+					ReplyFlags:8/big-integer,
 					Data/binary>>,
 	Frame_body = mycrypt:encrypt_frame_body(Rawbody, CryptFlag, Zip, config:get(sharedkey, Context)),
 	{ok, <<1:3/big-integer, CryptFlag:2/big-integer, Zip:1/big-integer, 0:2/big-integer, Frame_body/binary>>};
-encode(v1, {ctl, pipeline, close, [FlowID, CryptFlag, Zip]}, Context) ->
+encode(v1, {ctl, pipeline, close, {FlowID, CryptFlag, Zip}}, Context) ->
 	Raw_body = <<1:1/big-integer, ?OP_PIPELINE_CLOSE:15/big-integer, FlowID:16/big-integer>>,
 	Frame_body = mycrypt:encrypt_frame_body(Raw_body, CryptFlag, Zip, config:get(sharedkey, Context)),
 	{ok, <<1:3/big-integer, CryptFlag:2/big-integer, Zip:1/big-integer, 0:2/big-integer, Frame_body/binary>>};

@@ -20,11 +20,11 @@ init([{Addr, Port}, L7Config]) ->
 	end.
 
 handle_info({'EXIT', TrunkPid, _Reason}, {ListenSocket, Ref, Config, Context}=_State) ->
-	log(log_info, "Detected trunk_end ~p exited, unregister it.", [TrunkPid]),
+	log(log_info, "Detected socket_end ~p exited, unregister it.", [TrunkPid]),
 	{noreply, {ListenSocket, Ref, Config, lists:keydelete(TrunkPid, 2, Context)}};
 handle_info({inet_async, ListenSocket, Ref, {ok, TrunkSocket}}, {ListenSocket, Ref, Config, _Context}=State) ->
 	log(log_info, "Got connection from: ~p\n", [inet:peernames(TrunkSocket)]),
-	{ok, Pid} = trunk_end:start_link(TrunkSocket, Config),
+	{ok, Pid} = socket_end:start_link(TrunkSocket, Config),
 	
 	set_sockopt(ListenSocket, TrunkSocket),
 	gen_tcp:controlling_process(TrunkSocket, Pid),

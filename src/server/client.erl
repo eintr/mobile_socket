@@ -32,6 +32,7 @@ TmMrnjGdXB4RLwofb5L5VutQYblOq/Hg
 
 
 run() ->
+	ok = crypto:start(),
 	{ok, Pid} = start_link({{127,0,0,1}, 18080}, []),
 	gen_fsm:send_event(Pid, go),
 	loop(Pid).
@@ -45,7 +46,6 @@ start_link({IP, Port}, Config) ->
 	gen_fsm:start_link(?MODULE, [{IP, Port}, Config], []).
 
 init([{IP, Port}, Config]) ->
-	ok = crypto:start(),
 	[{'Certificate', Cert, not_encrypted}] = public_key:pem_decode(?PREINSTALLED_CERT),
 	CertRec = public_key:pkix_decode_cert(Cert, otp),
 	CA_PUBKEY = ((CertRec#'OTPCertificate'.tbsCertificate)#'OTPTBSCertificate'.subjectPublicKeyInfo)#'OTPSubjectPublicKeyInfo'.subjectPublicKey,
@@ -93,9 +93,9 @@ trunk_ok(goto, {TrunkSocket, Config, Context}=_State) ->
 
 create_flow(goto, {TrunkSocket, _Config, Context}=_State) ->
 	NewContext = config:set({cryptflag, 0}, Context),
-	{ok, Bin} = frame:encode({ctl, flow, open, {1, 0, 0, 0, 0, <<>>}}, NewContext),
+	{ok, Bin} = frame:encode({ctl, pipeline, open, {1, 0, 0, 0, 0, <<>>}}, NewContext),
 	ok = gen_tcp:send(TrunkSocket, Bin),
-	io:format("CTL_FLOW_OPEN msg sent\n"),
+	io:format("ctl/pipeline/open msg sent\n"),
 
 	{ok, Bin2} = frame:encode({data, 1, 0, 0, <<"GET /\r\n\r\n">>}, NewContext),
 	ok = gen_tcp:send(TrunkSocket, Bin2),
@@ -108,7 +108,7 @@ main_loop({tcp_closed, TrunkSocket}, {TrunkSocket, _Config, _Context}=State) ->
 	{stop, normal, State};
 main_loop({tcp, TrunkSocket, Frame}, {TrunkSocket, _Config, Context}=State) ->
 	case frame:decode(Frame, Context) of
-		{data, 1, CryptFlag, Data} ->
+		{data, 1, CryptFlag, Zip, Data} ->
 			io:format("Got data./n"),
 			file:write(config:get(outfile1, Context), Data),
 			{next_state, main_loop, State, 5000};
@@ -118,10 +118,10 @@ main_loop({tcp, TrunkSocket, Frame}, {TrunkSocket, _Config, Context}=State) ->
 		{ctl, trunk, failure, [ErrorMsg]} ->
 			io:format("?? Trunk failed:~p\n", [ErrorMsg]),
 			{stop, normal, State};
-		{ctl, flow, close, _} ->
+		{ctl, pipeline, close, _} ->
 			io:format("Received {ctl, flow, close, _}.\n"),
 			{stop, normal, State};
-		{ctl, flow, failure, [FlowID, ErrorMsg]} ->
+		{ctl, pipeline, failure, [FlowID, ErrorMsg]} ->
 			io:format("Flow ~p closed abnormally: ~p\n", [FlowID, ErrorMsg]),
 			{stop, normal, State};
 		_Msg ->
