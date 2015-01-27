@@ -4,7 +4,7 @@
 -include_lib("public_key/include/public_key.hrl").
 -include_lib("kernel/include/inet.hrl").
 
--export([run/0, start_link/2]).
+-export([run/2, start_link/2]).
 -export([init/1, code_change/4, handle_event/3, handle_info/3, handle_sync_event/4, terminate/3]).
 -export([prepare/2, recv_config/2, trunk_ok/2, create_flow/2, main_loop/2]).
 
@@ -31,9 +31,9 @@ TmMrnjGdXB4RLwofb5L5VutQYblOq/Hg
 ">>).
 
 
-run() ->
+run(IP, Port) ->
 	ok = crypto:start(),
-	{ok, Pid} = start_link({{127,0,0,1}, 18080}, []),
+	{ok, Pid} = start_link({IP, Port}, [{request, <<"GET /\r\n\r\n">>}, {output, "/tmp/out1"}]),
 	gen_fsm:send_event(Pid, go),
 	loop(Pid).
 
@@ -93,7 +93,7 @@ trunk_ok(goto, {TrunkSocket, Config, Context}=_State) ->
 
 create_flow(goto, {TrunkSocket, _Config, Context}=_State) ->
 	NewContext = config:set({cryptflag, 0}, Context),
-	{ok, Bin} = frame:encode({ctl, pipeline, open, {1, 0, 0, 0, 0, <<>>}}, NewContext),
+	{ok, Bin} = frame:encode({ctl, pipeline, open, {1, 0, 1, 0, 0, <<>>}}, NewContext),
 	ok = gen_tcp:send(TrunkSocket, Bin),
 	io:format("ctl/pipeline/open msg sent\n"),
 

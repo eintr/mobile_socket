@@ -14,23 +14,31 @@ start_link(TrunkSocket, Config) ->
 	gen_fsm:start_link(?MODULE, [TrunkSocket, Config], []).
 
 init([TrunkSocket, Config]) ->
-	{ok, wait_for_socket, {TrunkSocket, Config, [{flowid, []}]}}.
+	% Maybe check config here?
+	case config:get(socket_mode, Config) of
+		server ->
+			{ok, PrivKey} = mycrypt:load_privkey(config:get(server_key, Config)),
+			{ok, CertBin} = mycrypt:load_x509(config:get(server_crt, Config)),
+			ServerContext = Context++[{privkey, PrivKey}, {server_crt, CertBin}, {connect_time, 'TODO'}, {flowid, []}],
+			log(log_info, "Socket-end server started with client ~p.", [inet:peernames(TrunkSocket)]),
+			{next_state, wait_for_socket, {TrunkSocket, Config, ServerContext}};
+		client ->
+			{ok, CACertBin} = mycrypt:load_x509(config:get(ca_crt, Config));
+			ClientContext = Context++[{ca_crt, CACertBin}, {flowid, []}],
+			log(log_info, "Socket-end client started with server ~p", [inet:peernames(TrunkSocket)]),
+			{next_state, wait_for_socket, {TrunkSocket, Config, ClientContext}};
+		UnknownMode ->
+			log(log_error, "Unknown socket_mode:~p", [UnknownMode]),
+			{stop, "Unknown socket_mode", State}
+	end.
 
 wait_for_socket({socket_ready, TrunkSocket}, {TrunkSocket, Config, Context}=State) ->
 	gen_tcp:controlling_process(TrunkSocket, self()),
 	inet:setopts(TrunkSocket, [{active, true}, {packet, 2}, binary]),
-	log(log_info, "Serving client: ~p\n", [inet:peernames(TrunkSocket)]),
-	{next_state, relay, {TrunkSocket, Config, config:set({connect_time, 'TODO'}, Context)}};
+	{next_state, relay, State};
 wait_for_socket(_UnkownMsg, State) ->
-	io:format("UnkownMsg: ~p\n", [_UnkownMsg]),
-	{next_state, wait_for_socket, State}.
-
-send_cert({TrunkSocket, Config, Context}=State) ->
-	{ok, PrivKey} = mycrypt:load_privkey("key/test.key"),
-	{ok, CertBin} = mycrypt:load_x509("key/test.crt"),
-	{ok, Frame} = frame:encode({ctl, socket, cert, {erlang:crc32(CertBin), CertBin}}, Context),
-	ok = gen_tcp:send(TrunkSocket, Frame),
-	{TrunkSocket, Config, Context++[{privkey, PrivKey}]}.
+	log(log_error, "UnkownMsg: ~p\n", [_UnkownMsg]),
+	{stop, "UnkownMsg", State}.
 
 wait_for_ok(goto, {TrunkSocket, Config, Statics}=Context) ->
 	case gen_tcp:recv(TrunkSocket, 0) of
@@ -64,17 +72,30 @@ relay({tcp, TrunkSocket, Frame}, {TrunkSocket, Config, Statics}=Context) ->
 			end,
 			{next_state, relay, Context};
 		{ctl, socket, cert_req, _} ->
-			{next_state, relay, send_cert(Context)};
+			ok = send_cert(Context);
+			{next_state, relay, Context};
+		{ctl, socket, cert, Certificate} ->
+			log(log_info, "Received peer certificate."),
+            case public_key:pkix_verify(Certificate, config:get(ca_pubkey, Context)) of
+                false ->
+					log(log_error, "Server certificate verify failed."),
+					{stop, "Server certificate verify failed."};
+                true ->
+                    log(log_info, "Server certificate verify Passed."),
+					{next_state, relay, {TrunkSocket, Config, Statics++[{pub_key, mycrypt:extract_pubkey(Certificate)}, Context)}]}
+            end;
 		{ctl, socket, key_sync, {CRC32, SharedKey}} ->
 			case erlang:crc32(SharedKey) of
 				CRC32 ->
+					log(log_info, "Shared key decrypted successfully! Accepted!"),
 					{next_state, relay, {TrunkSocket, Config, Statics++[{sharedkey, SharedKey}]}};
 				_ ->
-					log(log_error, "Can't decrypt shared key! Rejected!"),
+					log(log_error, "Can't decrypt shared key! Reject!"),
 					{ok, Frame} = frame:encode({ctl, socket, key_rej, {}}, Statics),
 					gen_tcp:send(TrunkSocket, Frame),
 					{next_state, relay, {TrunkSocket, Config, Statics}}
 			end;
+		{ctl, socket, key_rej, _} ->
 		{ctl, pipeline, open, {FlowID, CryptFlag, Zip, MaxDelay, ReplyFlags, Data}=PipelineCFG} ->
 			log(log_info, "~p: Creating flow_end for id ~p with CryptFlag=~p", [?MODULE, FlowID, CryptFlag]),
 			{ok, Pid} = pipeline_end:start_link(self(), {{10,210,74,190}, 80}, PipelineCFG),
@@ -150,6 +171,11 @@ handle_info(Info, StateName, Context) ->
 	?MODULE:StateName(Info, Context).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+send_cert({TrunkSocket, Config, Context}=State) ->
+	CertBin = config:get(server_crt, Context),
+	{ok, Frame} = frame:encode({ctl, socket, cert, {erlang:crc32(CertBin), CertBin}}, Context),
+	gen_tcp:send(TrunkSocket, Frame).
 
 context(K, C) ->
 	config:get(K, C).
