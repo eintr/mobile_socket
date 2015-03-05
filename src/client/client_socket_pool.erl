@@ -23,7 +23,7 @@ handle_cast(Msg, Context) ->
     {noreply, Context}.
 
 handle_call({enumall}, From, {Config, Statics}=Context) ->
-	{reply, enumall_socketend(), Context};
+	{reply, enumall_socketends(), Context};
 handle_call({get_socket_end, Host}, From, {Config, Statics}=Context) ->
 	case get(Host) of
 		{Pid, RefCount} ->
@@ -71,25 +71,12 @@ cleanup_socket_end({Pid}) ->
 enumall_socketends() ->
 	enum_socketend(get(), []).
 
-    Collector = fun({Addr, Pid}) ->
-        Pid ! {report, self()},
-        receive
-            M -> M
-        after 1000 ->
-            io_lib:format("Server ~p => addr_server didnt response.\n", [Addr])
-        end
-    end,
-    Translater = fun({{{A, B, C, D}, Port}, {Queue, EstDelay, {MaxCDelay, MaxRDelay, MaxSDelay}}}) ->
-        io_lib:format("Server ~b.~b.~b.~b:~b => Configured Delay: {~p, ~p, ~p}, Queuelen: ~p, EstDelay: ~pms\n", [A, B, C, D, Port, MaxCDelay, MaxRDelay, MaxSDelay, length(Queue), EstDelay])
-    end,
-    qdict ! {enum_all, self()},
-    receive
-        {enum_all, List} ->
-            lists:map(Translater,
-                serverlist_sort(fun
-                    ({_, {_, EstDelay, _}}) -> -EstDelay end, lists:map(Collector, List)));
-        _Msg ->
-            "Cant enum servers"
-    end.
-
+enum_socketend([], List) ->
+	List;
+enum_socketend([{Pid, RefCount}|Tail], List) ->
+	Pid ! {self(), enum},
+	receive
+		M ->
+			enum_socketend(Tail, List++[{Pid, RefCount, M}])
+	end.
 

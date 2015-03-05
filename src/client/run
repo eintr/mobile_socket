@@ -1,0 +1,4 @@
+#!/bin/sh
+
+exec erl -noshell -eval 'client:start()' -eval 'init:stop()'
+

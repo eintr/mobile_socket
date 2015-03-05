@@ -7,7 +7,9 @@ get(Key, List) ->
         {Key, Value} ->
             Value;
         fasle ->
-            undefined
+            undefined;
+		M ->
+			io:format("get(~p, ~p)=~p\n", [Key, List, M])
     end.
 
 set(Key, Value, List) ->

@@ -17,6 +17,10 @@ init([Socket, Config]) ->
 handle_info(Info, StateName, State) ->
 	?MODULE:StateName(Info, State).
 
+handle({From, enum}, {Socket, Config, Statics}=Context) ->
+	From ! Context,
+	{next_state, handle, Context};
+
 handle({From, terminate}, {Socket, Config, Statics}=Context) ->
 	{stop, Context, "Demanded termination."};
 
