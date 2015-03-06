@@ -6,7 +6,7 @@ get(Key, List) ->
     case lists:keyfind(Key, 1, List) of
         {Key, Value} ->
             Value;
-        fasle ->
+        false ->
             undefined;
 		M ->
 			io:format("get(~p, ~p)=~p\n", [Key, List, M])
