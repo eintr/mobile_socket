@@ -1,21 +1,23 @@
 -module(client_socket_end).
 -behaviour(gen_fsm).
 
--export([start_link/2]).
--export([init/1]).
+-export([start_link/1]).
+-export([init/1, handle/2, terminate/3, handle_info/3]).
 
 -include_lib("kernel/include/inet.hrl").
 
-start_link(Socket, Config) ->
-	gen_fsm:start_link(?MODULE, [Socket, Config++[{pipelineid, 1}]], []).
+start_link(Config) ->
+	gen_fsm:start_link(?MODULE, [Config++[{pipelineid, 1}]], []).
 
-init([Socket, Config]) ->
-	% set Socket active
-	inet:setopts(Socket, [{active, true}]),
+init([Config]) ->
+	{ok, Socket} = gen_tcp:connect(kv:get(server_addr, Config), kv:get(server_port, Config), [binary, {active, true}, {packet, 2}]),
 	{ok, handle, {Socket, Config, []}}.
 
 handle_info(Info, StateName, State) ->
 	?MODULE:StateName(Info, State).
+
+terminate(Reason, StateName, StateData) ->
+	io:format("terminate at state ~p.", [StateName]).
 
 handle({From, enum}, {Socket, Config, Statics}=Context) ->
 	From ! Context,
@@ -25,9 +27,11 @@ handle({From, terminate}, {Socket, Config, Statics}=Context) ->
 	{stop, Context, "Demanded termination."};
 
 handle({From, data, FlowID, CryptFlag, Zipflag, RawData}, {Socket, Config, Statics}=Context) ->
-	case frame:encode({data, FlowID, RawData}, context(sharedkey, Config)) of
+	io:format("~p: Got data from pipeline_end: ~p\n", [?MODULE, RawData]),
+	case frame:encode({data, FlowID, 0, 0, RawData}, Config) of
 		{ok, Bin} ->
-			gen_tcp:send(Socket, Bin),
+			ok = gen_tcp:send(Socket, Bin),
+			io:format("~p: Data sent\n", [?MODULE]),
 			{next_state, handle, Context};
 		{error, Reason} ->
 			io:format("log_error: frame:encode() failed: ~s, frame dropped.", [Reason]),
@@ -35,6 +39,7 @@ handle({From, data, FlowID, CryptFlag, Zipflag, RawData}, {Socket, Config, Stati
 	end;
 
 handle({From, ctl, pipeline, open, {FlowID, CryptFlag, Zip,  MaxDelay, ReplyFlags, Data}}, {Socket, Config, Statics}=Context) ->
+	io:format("~p: Got ctl/pipeline/open from pipeline_end.\n", [?MODULE]),
 	{ok, BinData} = frame:encode({ctl, pipeline, open, {FlowID, CryptFlag, Zip, MaxDelay, ReplyFlags, Data}}, Config),
 	ok = gen_tcp:send(Socket, BinData),
 	put(FlowID, {From, 0, 0}),
@@ -49,7 +54,7 @@ handle({From, ctl, pipeline, close, {FlowID, CryptFlag, Zip}}, {Socket, Config, 
 	{next_state, handle, Context};
 
 handle({From, ctl, Level, Code, Args}, {Socket, Config, Statics}=Context) ->
-	case frame:encode({ctl, Level, Code, Args}, context(sharedkey, Context)) of
+	case frame:encode({ctl, Level, Code, Args}, kv:get(sharedkey, Context)) of
 		{ok, Bin} ->
 			gen_tcp:send(Socket, Bin),
 			{next_state, handle, Context};
@@ -59,14 +64,14 @@ handle({From, ctl, Level, Code, Args}, {Socket, Config, Statics}=Context) ->
 	end;
 
 handle({From, get_pipelineid}, {Socket, Config, Statics}=Context) ->
-	ID = config:get(pipelineid, Config),
+	ID = kv:get(pipelineid, Config),
 	case get(ID) of
 		{_From, _, _} ->
-			NewConfig = config:set(pipelineid, ID+1, Config),
+			NewConfig = kv:set(pipelineid, ID+1, Config),
 			handle({From, get_pipelineid}, {Socket, NewConfig, Statics});
 		undefined ->
 			From ! {id, ID},
-			NewConfig = config:set(pipelineid, ID+1, Config),
+			NewConfig = kv:set(pipelineid, ID+1, Config),
 			{next_state, handle, {Socket, NewConfig, Statics}}
 	end;
 
@@ -114,6 +119,3 @@ handle({tcp, Socket, Data}, {Socket, Config, Statics}=Context) ->
 handle({tcp_close, Socket}, {Socket, Config, Statics}=Context) ->
 	{stop, Context, "Peer closed"}.
 	
-context(K, C) ->
-	config:config(K, C).
-
