@@ -6,8 +6,8 @@ start() ->
 	main([
 		{listen_addr, "0.0.0.0"},
 		{listen_port, 3128},
-%		{server_addr, "127.0.0.1"},
-		{server_addr, "10.73.31.119"},
+		{server_addr, "127.0.0.1"},
+%		{server_addr, "10.73.31.119"},
 		{server_port, 8001},
 		{admin_port, 3333}
 	]).

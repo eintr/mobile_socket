@@ -50,7 +50,7 @@ handle({From, ctl, pipeline, close, {FlowID, CryptFlag, Zip}}, {Socket, Config, 
 	{ok, BinData} = frame:encode({ctl, pipeline, close, {FlowID, CryptFlag, Zip}}, Config),
 	ok = gen_tcp:send(Socket, BinData),
 	erase(FlowID),
-	From ! ok,
+	%From ! ok,
 	{next_state, handle, Context};
 
 handle({From, ctl, Level, Code, Args}, {Socket, Config, Statics}=Context) ->
@@ -116,6 +116,6 @@ handle({tcp, Socket, Data}, {Socket, Config, Statics}=Context) ->
 			{next_state, handle, Context}
 	end;
 
-handle({tcp_close, Socket}, {Socket, Config, Statics}=Context) ->
+handle({tcp_closed, Socket}, {Socket, Config, Statics}=Context) ->
 	{stop, Context, "Peer closed"}.
 	

@@ -5,7 +5,7 @@
 -include_lib("kernel/include/inet.hrl").
 
 http_proxy_callback(Client_socket, [Config]) ->
-	io:format("log_debug: Got connection.\n"),
+	io:format("~p: log_debug: Got proxy connection.\n", [?MODULE]),
 	gen_tcp:controlling_process(Client_socket, self()),
 	http_proxy_protocol(Client_socket, Config).
 
