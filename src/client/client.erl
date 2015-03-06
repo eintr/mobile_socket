@@ -6,11 +6,15 @@ start() ->
 	main([
 		{listen_addr, "0.0.0.0"},
 		{listen_port, 3128},
+%		{server_addr, "127.0.0.1"},
+		{server_addr, "10.73.31.119"},
+		{server_port, 8001},
 		{admin_port, 3333}
 	]).
 
 main(Config) ->
 	io:format("Start proxy service at ~p:~p\n", [kv:get(listen_addr, Config), kv:get(listen_port, Config)]),
+	client_socket_pool:start_link(Config),
 	simple_tcp_server:create({kv:get(listen_addr, Config), kv:get(listen_port, Config), []}, {http_proxy, http_proxy_callback, [Config]}),
 	{ok, Socket} = gen_tcp:listen(kv:get(admin_port, Config), [inet, {active, true}, {packet, http}, {reuseaddr, true}]),
 	admin_start(Socket, Config).
