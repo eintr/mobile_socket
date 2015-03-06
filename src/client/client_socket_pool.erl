@@ -6,10 +6,11 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 
 start_link(Config) ->
-	gen_server:start_link({global, socket_end_pool}, ?MODULE, [Config], []).
+	gen_server:start_link({local, socket_end_pool}, ?MODULE, [Config], []).
 
 init([Config]) ->
 	erase(),
+	io:format("Start socket_end_pool service.\n"),
 	{ok, {Config, [{socket_end_count, 0}]}}.
 
 handle_info({terminate}, Context) ->
@@ -25,19 +26,18 @@ handle_cast(Msg, Context) ->
 handle_call({enumall}, From, {Config, Statics}=Context) ->
 	{reply, enumall_socketends(), Context};
 handle_call({get_socket_end, Host}, From, {Config, Statics}=Context) ->
+	io:format("Got get_socket_end request from ~p\n", [From]),
 	case get(Host) of
 		{Pid, RefCount} ->
+			io:format("There is already a socket_end(~p) for host ~p, multiplex.\n", [Pid, Host]),
 			put(Host, {Pid, RefCount+1}),
 			{reply, {socket_end_pid, Pid}, Context};
 		undefined ->
-			case gen_tcp:connect(kv:get('ServerAddr', Config), kv:get('ServerPort', Config), [binary, {packet, 2}, {active, false}]) of
-				{ok, Socket} ->
-					{ok, Pid} = client_socket_end:start_link([Socket, Config]),
-					put(Host, {Pid, 1}),
-					{reply, {socket_end_pid, Pid}, Context};
-				{error, Reason} ->
-					{reply, {error, Reason}, Context}
-			end
+			io:format("No socket_end for host ~p, create.\n", [Host]),
+			{ok, Pid} = client_socket_end:start_link(Config),
+			io:format("socket_end(~p) started.\n", [Pid]),
+			put(Host, {Pid, 1}),
+			{reply, {socket_end_pid, Pid}, Context}
 	end;
 handle_call({close_socket_end, Host}, From, {Config, Statics}=Context) ->
 	case get(Host) of
